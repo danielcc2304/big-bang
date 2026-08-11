@@ -1,0 +1,52 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$roomId": {
+        ".read": "auth != null",
+        ".write": "auth != null && ((!data.exists() && newData.child('hostUid').val() == auth.uid) || data.child('hostUid').val() == auth.uid || data.child('coordinator/coordinatorId').val() == auth.uid)",
+        "commands": {
+          "$commandId": {
+            ".write": "auth != null && newData.child('submittedByUid').val() == auth.uid && newData.child('command/commandId').val() == $commandId && root.child('rooms').child($roomId).child('players').child(newData.child('command/playerId').val()).child('uid').val() == auth.uid",
+            ".validate": "newData.hasChildren(['command','submittedByUid','submittedAt']) && newData.child('submittedAt').isNumber()"
+          }
+        },
+        "players": {
+          "$playerId": {
+            ".write": "auth != null && (data.child('uid').val() == auth.uid || newData.child('uid').val() == auth.uid)"
+          }
+        },
+        "seats": {
+          "$seatId": {
+            ".write": "auth != null && ((!data.exists() && root.child('rooms').child($roomId).child('status').val() == 'LOBBY' && newData.child('ownerUid').val() == auth.uid) || data.child('ownerUid').val() == auth.uid || root.child('rooms').child($roomId).child('coordinator/coordinatorId').val() == auth.uid)"
+          }
+        },
+        "coordinator": {
+          ".validate": "newData.hasChildren(['coordinatorId','coordinatorEpoch','leaseUntil','heartbeat']) && newData.child('coordinatorEpoch').isNumber() && newData.child('leaseUntil').isNumber()"
+        },
+        "canonical": {
+          ".validate": "!newData.exists() || (newData.child('revision').isNumber() && newData.child('revision').val() >= data.child('revision').val())"
+        }
+      }
+    },
+    "seatProofs": {
+      "$roomId": {
+        "$seatId": {
+          ".read": "auth != null && (root.child('rooms').child($roomId).child('seats').child($seatId).child('ownerUid').val() == auth.uid || root.child('rooms').child($roomId).child('coordinator/coordinatorId').val() == auth.uid)",
+          ".write": "auth != null && (root.child('rooms').child($roomId).child('seats').child($seatId).child('ownerUid').val() == auth.uid || root.child('rooms').child($roomId).child('coordinator/coordinatorId').val() == auth.uid)",
+          ".validate": "newData.isString() && newData.val().length == 64"
+        }
+      }
+    },
+    "reconnectClaims": {
+      "$roomId": {
+        ".read": "auth != null && root.child('rooms').child($roomId).child('coordinator/coordinatorId').val() == auth.uid",
+        "$uid": {
+          ".write": "auth != null && (auth.uid == $uid || root.child('rooms').child($roomId).child('coordinator/coordinatorId').val() == auth.uid)",
+          ".validate": "!newData.exists() || (newData.child('hash').isString() && newData.child('hash').val().length == 64 && newData.child('requestedAt').isNumber())"
+        }
+      }
+    }
+  }
+}
