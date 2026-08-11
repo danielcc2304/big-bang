@@ -105,6 +105,13 @@ export interface GameLogEntry {
   readonly revision: number;
   readonly message: string;
   readonly tone: 'NORMAL' | 'ACTION' | 'DANGER' | 'SYSTEM';
+  readonly effect?: {
+    readonly kind: 'JUDGEMENT' | 'REACTION';
+    readonly playerId: string;
+    readonly card: Card;
+    readonly success: boolean;
+    readonly headline: string;
+  };
 }
 
 export type Winner = 'LAW' | 'OUTLAWS' | 'RENEGADE';

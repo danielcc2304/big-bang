@@ -12,6 +12,21 @@ const setups = Array.from({ length: 4 }, (_, index) => ({
 }));
 
 describe('GameBoard', () => {
+  it('muestra el resultado visual de un desenfunde decisivo', () => {
+    const base = createGame(setups, 13);
+    const revealed = base.deck[0]!;
+    const state = {
+      ...base,
+      logs: [...base.logs, { id: 'effect-1', revision: base.revision, message: 'Jugador 1 sale libre de Prisión.', tone: 'ACTION' as const, effect: { kind: 'JUDGEMENT' as const, playerId: setups[0]!.id, card: revealed, success: true, headline: '¡LIBRE!' } }],
+      turn: { ...base.turn, currentPlayerId: setups[1]!.id, phase: 'PLAY' as const },
+    };
+
+    render(<GameBoard state={state} viewerId={setups[0]!.id} error={null} dispatch={() => true} onExit={() => undefined} />);
+
+    expect(screen.getByText('¡LIBRE!')).toBeInTheDocument();
+    expect(screen.getAllByText('Jugador 1 sale libre de Prisión.')).toHaveLength(2);
+  });
+
   it('muestra el nombre de la última carta descartada', () => {
     const base = createGame(setups, 17);
     const discarded = base.deck.find((card) => card.name === 'CAT_BALOU')!;

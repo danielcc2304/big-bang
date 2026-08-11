@@ -1,4 +1,4 @@
-import type { Card, CardName, CommandFailure, CommandResult, GameCommand, GameState, Player, Reaction } from '../../types';
+import type { Card, CardName, CommandFailure, CommandResult, GameCommand, GameLogEntry, GameState, Player, Reaction } from '../../types';
 import { CARD_CATALOG } from '../cards/catalog';
 import { characterByName } from '../characters/characters';
 import { distanceBetween, isInRange } from '../rules/distance';
@@ -13,10 +13,17 @@ const fail = (state: GameState, code: string, message: string): CommandFailure =
 const isRed = (card: Card): boolean => card.suit === 'HEARTS' || card.suit === 'DIAMONDS';
 const hasAllCards = (player: Player, ids: readonly string[]): boolean => ids.every((id) => player.hand.some((card) => card.id === id)) && new Set(ids).size === ids.length;
 
-const log = (state: GameState, message: string, tone: 'NORMAL' | 'ACTION' | 'DANGER' | 'SYSTEM' = 'NORMAL'): GameState => ({
-  ...state,
-  logs: [...state.logs.slice(-79), { id: `log-${state.revision + 1}-${state.logs.length}`, revision: state.revision + 1, message, tone }],
-});
+const SUIT_LABEL: Record<Card['suit'], string> = { SPADES: 'picas', HEARTS: 'corazones', DIAMONDS: 'diamantes', CLUBS: 'tréboles' };
+const cardResult = (card: Card): string => `${CARD_CATALOG[card.name].label} (${card.rank} de ${SUIT_LABEL[card.suit]})`;
+
+const log = (state: GameState, message: string, tone: 'NORMAL' | 'ACTION' | 'DANGER' | 'SYSTEM' = 'NORMAL', effect?: GameLogEntry['effect']): GameState => {
+  const revision = state.revision + 1;
+  const sequence = state.logs.filter((entry) => entry.revision === revision).length;
+  return {
+    ...state,
+    logs: [...state.logs.slice(-79), { id: `log-${revision}-${sequence}`, revision, message, tone, ...(effect ? { effect } : {}) }],
+  };
+};
 
 const equipField = (name: CardName): 'weapon' | 'barrel' | 'mustang' | 'scope' | 'jail' | 'dynamite' | null => {
   if (CARD_CATALOG[name].kind === 'WEAPON') return 'weapon';
@@ -42,7 +49,14 @@ const barrelCheck = (state: GameState, target: Player, requiredSuccesses: number
     const draw = drawCards(next, 1);
     const card = draw.cards[0];
     next = card ? { ...draw.state, discard: [...draw.state.discard, card] } : draw.state;
-    if (card?.suit === 'HEARTS') successes += 1;
+    if (card) {
+      const success = card.suit === 'HEARTS';
+      if (success) successes += 1;
+      const source = index === 0 && target.equipment.barrel ? 'el Barril' : 'la habilidad de Jourdonnais';
+      next = log(next, `${target.name} desenfunda ${cardResult(card)} con ${source}: ${success ? 'evita un impacto de BANG!' : 'no consigue protegerse'}.`, success ? 'ACTION' : 'DANGER', {
+        kind: 'JUDGEMENT', playerId: target.id, card, success, headline: success ? '¡SE SALVA!' : 'EL BARRIL FALLA',
+      });
+    }
   }
   return { state: next, successes };
 };
@@ -78,8 +92,19 @@ const resolveReaction = (state: GameState, command: Extract<GameCommand, { type:
 
   let next = discardFromHand(state, player.id, cards.map((card) => card.id));
   const total = reaction.cardsPlayed + cards.length;
+  if (cards.length > 0) {
+    const labels = cards.map((card) => CARD_CATALOG[card.name].label).join(' + ');
+    const purpose = reaction.type === 'DUEL' ? 'mantiene el Duelo' : reaction.type === 'INDIANS' ? 'rechaza el ataque de los Indios' : reaction.type === 'GATLING' ? 'esquiva la Gatling' : 'esquiva el BANG!';
+    next = log(next, `${player.name} juega ${labels} y ${purpose}${total < reaction.requiredCards ? `; aún necesita ${reaction.requiredCards - total}` : ''}.`, 'ACTION', {
+      kind: 'REACTION', playerId: player.id, card: cards[0]!, success: total >= reaction.requiredCards, headline: CARD_CATALOG[cards[0]!.name].label.toUpperCase(),
+    });
+  }
   if (cards.length > 0 && total < reaction.requiredCards) return { ok: true, state: { ...next, reaction: { ...reaction, cardsPlayed: total } } };
-  if (cards.length === 0 || total < reaction.requiredCards) next = damagePlayer(next, player.id, 1, reaction.sourcePlayerId);
+  if (cards.length === 0 || total < reaction.requiredCards) {
+    next = damagePlayer(next, player.id, 1, reaction.sourcePlayerId);
+    const cause = reaction.type === 'DUEL' ? 'se queda sin BANG! en el Duelo' : reaction.type === 'INDIANS' ? 'no responde con BANG! a los Indios' : reaction.type === 'GATLING' ? 'no juega ¡Fallaste! contra la Gatling' : 'no juega ¡Fallaste! contra el BANG!';
+    next = log(next, `${player.name} ${cause} y pierde 1 vida.`, 'DANGER');
+  }
   if (next.winner) return { ok: true, state: { ...next, reaction: null, multiAction: null, storeState: null, turn: { ...next.turn, phase: 'GAME_OVER' } } };
   if (reaction.type === 'DUEL' && cards.length > 0 && total >= reaction.requiredCards) {
     next = createReaction({ ...next, reaction: null }, 'DUEL', player.id, reaction.sourcePlayerId, 1, command.createdAt);
@@ -98,17 +123,27 @@ const resolveTurnStart = (state: GameState, player: Player): GameState => {
     const dynamite = current.equipment.dynamite;
     const draw = drawCards(next, 1);
     const judgement = draw.cards[0];
+    let dynamiteRecipient: Player | undefined;
     next = judgement ? { ...draw.state, discard: [...draw.state.discard, judgement] } : draw.state;
     current = playerById(next, player.id)!;
     next = replacePlayer(next, { ...current, equipment: { ...current.equipment, dynamite: null } });
-    if (judgement?.suit === 'SPADES' && Number(judgement.rank) >= 2 && Number(judgement.rank) <= 9) {
+    const exploded = judgement?.suit === 'SPADES' && Number(judgement.rank) >= 2 && Number(judgement.rank) <= 9;
+    if (exploded) {
       next = { ...next, discard: [...next.discard, dynamite] };
       next = damagePlayer(next, player.id, 3, null);
     } else {
       const recipientId = nextLivingPlayerId(next, player.id);
       const recipient = playerById(next, recipientId);
-      if (recipient?.alive && !recipient.equipment.dynamite) next = replacePlayer(next, { ...recipient, equipment: { ...recipient.equipment, dynamite } });
+      if (recipient?.alive && !recipient.equipment.dynamite) {
+        dynamiteRecipient = recipient;
+        next = replacePlayer(next, { ...recipient, equipment: { ...recipient.equipment, dynamite } });
+      }
       else next = { ...next, discard: [...next.discard, dynamite] };
+    }
+    if (judgement) {
+      next = log(next, `${player.name} desenfunda ${cardResult(judgement)} por la Dinamita: ${exploded ? '¡explota y pierde 3 vidas!' : `se salva${dynamiteRecipient ? ` y la Dinamita pasa a ${dynamiteRecipient.name}` : '; la Dinamita se descarta porque no puede pasar'}`}.`, exploded ? 'DANGER' : 'ACTION', {
+        kind: 'JUDGEMENT', playerId: player.id, card: judgement, success: !exploded, headline: exploded ? '¡BOOM!' : 'PASA DE LARGO',
+      });
     }
   }
   current = playerById(next, player.id)!;
@@ -124,7 +159,11 @@ const resolveTurnStart = (state: GameState, player: Player): GameState => {
     next = judgement ? { ...draw.state, discard: [...draw.state.discard, judgement, jail] } : { ...draw.state, discard: [...draw.state.discard, jail] };
     current = playerById(next, player.id)!;
     next = replacePlayer(next, { ...current, equipment: { ...current.equipment, jail: null } });
-    if (judgement?.suit !== 'HEARTS') {
+    const escaped = judgement?.suit === 'HEARTS';
+    if (judgement) next = log(next, `${player.name} desenfunda ${cardResult(judgement)} en Prisión: ${escaped ? 'sale libre y juega su turno' : 'permanece encerrado y pierde el turno'}.`, escaped ? 'ACTION' : 'DANGER', {
+      kind: 'JUDGEMENT', playerId: player.id, card: judgement, success: escaped, headline: escaped ? '¡LIBRE!' : 'PIERDE EL TURNO',
+    });
+    if (!escaped) {
       const nextId = nextLivingPlayerId(next, player.id);
       return { ...next, turn: { number: next.turn.number + 1, currentPlayerId: nextId, phase: 'TURN_START', pendingDiscardCount: 0 } };
     }
@@ -261,7 +300,8 @@ const handleCommand = (state: GameState, command: GameCommand): CommandResult =>
           })()
         : drawCards(state, 2);
       let count = draw.cards.length;
-      if (player.character.name === 'Black Jack' && draw.cards[1] && isRed(draw.cards[1])) {
+      const blackJackReveal = player.character.name === 'Black Jack' ? draw.cards[1] : undefined;
+      if (blackJackReveal && isRed(blackJackReveal)) {
         const bonus = drawCards(draw.state, 1);
         draw = { state: bonus.state, cards: [...draw.cards, ...bonus.cards] };
         count = draw.cards.length;
@@ -271,7 +311,14 @@ const handleCommand = (state: GameState, command: GameCommand): CommandResult =>
       const message = firstCardSource === 'DISCARD'
         ? `${player.name} roba la última carta del descarte y ${Math.max(0, count - 1)} del mazo.`
         : `${player.name} roba ${count} cartas.`;
-      return { ok: true, state: log({ ...next, turn: { ...next.turn, phase: 'PLAY' } }, message) };
+      let logged = log({ ...next, turn: { ...next.turn, phase: 'PLAY' } }, message);
+      if (blackJackReveal) {
+        const bonus = isRed(blackJackReveal);
+        logged = log(logged, `Black Jack muestra ${cardResult(blackJackReveal)}: ${bonus ? 'es roja y roba una carta extra' : 'no es roja y no recibe carta extra'}.`, bonus ? 'ACTION' : 'NORMAL', {
+          kind: 'JUDGEMENT', playerId: player.id, card: blackJackReveal, success: bonus, headline: bonus ? 'CARTA EXTRA' : 'SIN BONIFICACIÓN',
+        });
+      }
+      return { ok: true, state: logged };
     }
     case 'END_TURN': {
       if (state.turn.currentPlayerId !== player.id || state.turn.phase !== 'PLAY') return fail(state, 'NOT_YOUR_TURN', 'No puedes terminar el turno ahora.');
@@ -282,8 +329,12 @@ const handleCommand = (state: GameState, command: GameCommand): CommandResult =>
     }
     case 'DISCARD_CARDS': {
       if (state.turn.currentPlayerId !== player.id || state.turn.phase !== 'DISCARD') return fail(state, 'NOT_DISCARD_PHASE', 'No hay descarte pendiente.');
-      if (command.payload.cardIds.length !== state.turn.pendingDiscardCount || !hasAllCards(player, command.payload.cardIds)) return fail(state, 'WRONG_DISCARD_COUNT', `Descarta exactamente ${state.turn.pendingDiscardCount} cartas.`);
-      const discarded = discardFromHand(state, player.id, command.payload.cardIds);
+      const currentExcess = Math.max(0, player.hand.length - player.lives);
+      if (command.payload.cardIds.length !== currentExcess || !hasAllCards(player, command.payload.cardIds)) return fail(state, 'WRONG_DISCARD_COUNT', `Descarta exactamente ${currentExcess} cartas.`);
+      let discarded = discardFromHand(state, player.id, command.payload.cardIds);
+      const remaining = playerById(discarded, player.id)!;
+      if (remaining.hand.length > remaining.lives) return fail(state, 'HAND_LIMIT_NOT_MET', 'La mano todavía supera el límite de vidas.');
+      discarded = log(discarded, `${player.name} descarta ${command.payload.cardIds.length} carta(s) y termina con ${remaining.hand.length}, su límite actual de mano.`, 'NORMAL');
       const nextId = nextLivingPlayerId(discarded, player.id);
       return { ok: true, state: { ...discarded, turn: { number: state.turn.number + 1, currentPlayerId: nextId, phase: 'TURN_START', pendingDiscardCount: 0 }, players: discarded.players.map((p) => p.id === nextId ? { ...p, bangsPlayedThisTurn: 0 } : p) } };
     }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Card, GameCommand, GameState, Player } from '../types';
+import type { Card, GameCommand, GameLogEntry, GameState, Player } from '../types';
 import { command } from '../game/engine';
 import { CARD_CATALOG } from '../game/cards/catalog';
 import { distanceBetween } from '../game/rules/distance';
@@ -24,6 +24,7 @@ const ROLE_COPY = {
   OUTLAW: ['Forajido', 'Elimina al Sheriff.'],
   RENEGADE: ['Renegado', 'Sé el último con vida y elimina al Sheriff al final.'],
 } as const;
+const SUIT_SYMBOL: Record<Card['suit'], string> = { SPADES: '♠', HEARTS: '♥', DIAMONDS: '♦', CLUBS: '♣' };
 
 const soundForLog = (message: string): Parameters<typeof sound.play>[0] => {
   if (message.includes('BANG!')) return 'bang';
@@ -45,6 +46,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   const [keepCards, setKeepCards] = useState<readonly string[]>([]);
   const [debug, setDebug] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(sound.enabled);
+  const [visibleEffects, setVisibleEffects] = useState<readonly GameLogEntry[]>([]);
   const lastSoundLogId = useRef(state.logs.at(-1)?.id);
   const previousTurnPlayerId = useRef(state.turn.currentPlayerId);
   const previousWinner = useRef(state.winner);
@@ -56,6 +58,11 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   const isHumanTurn = state.turn.currentPlayerId === viewerId && viewer.alive;
   const canChoosePedroDraw = isHumanTurn && state.turn.phase === 'DRAW' && viewer.character.name === 'Pedro Ramirez' && Boolean(topDiscard);
   const canPlay = isHumanTurn && state.turn.phase === 'PLAY' && !state.reaction && !state.storeState;
+  const latestEffectLogs = useMemo(() => {
+    const latestRevision = [...state.logs].reverse().find((entry) => entry.effect)?.revision;
+    return latestRevision === undefined ? [] : state.logs.filter((entry) => entry.revision === latestRevision && entry.effect).slice(-2);
+  }, [state.logs]);
+  const latestEffectKey = latestEffectLogs.map((entry) => entry.id).join('|');
 
   useEffect(() => { setReactionCards([]); }, [state.reaction?.id]);
   useEffect(() => { if (state.turn.phase !== 'DISCARD') setKeepCards([]); }, [state.turn.phase]);
@@ -77,6 +84,12 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
     previousWinner.current = state.winner;
   }, [state.winner, viewer.role]);
   useEffect(() => { if (error) sound.play('error'); }, [error]);
+  useEffect(() => {
+    if (!latestEffectKey) return;
+    setVisibleEffects(latestEffectLogs);
+    const timer = window.setTimeout(() => setVisibleEffects([]), 3_200);
+    return () => window.clearTimeout(timer);
+  }, [latestEffectKey, latestEffectLogs]);
   useEffect(() => {
     if (syncLabel !== 'LOCAL') return;
     if (state.turn.currentPlayerId === viewerId && state.turn.phase === 'TURN_START') dispatch(command(state, viewerId, 'RESOLVE_TURN_START', {}));
@@ -150,6 +163,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
       <section className="turn-banner"><span>{status}</span><em>Turno {state.turn.number}</em></section>
       <section className={`viewer-role-banner role-${viewer.role.toLowerCase()}`} aria-label={`Tu rol es ${viewerRoleLabel}`}><span>Tu rol</span><b>{viewer.role === 'SHERIFF' ? '★ ' : ''}{viewerRoleLabel}</b><small>{viewerRoleObjective}</small></section>
       {error && <div className="error-toast" role="alert">{error}</div>}
+      {visibleEffects.length > 0 && <div className="outcome-stack" aria-live="polite">{visibleEffects.map((entry) => entry.effect && <article className="outcome-card" data-outcome={entry.effect.success ? 'success' : 'failure'} key={entry.id}><div className="outcome-reveal"><span>{CARD_CATALOG[entry.effect.card.name].icon}</span><b>{CARD_CATALOG[entry.effect.card.name].label}</b><small className={entry.effect.card.suit === 'HEARTS' || entry.effect.card.suit === 'DIAMONDS' ? 'red' : ''}>{entry.effect.card.rank}{SUIT_SYMBOL[entry.effect.card.suit]}</small></div><div><strong>{entry.effect.headline}</strong><p>{entry.message}</p></div></article>)}</div>}
 
       <section className="saloon-table" aria-label="Mesa de juego">
         <div className="table-brand" aria-hidden="true">SALOON<span>EST. 1876</span></div>

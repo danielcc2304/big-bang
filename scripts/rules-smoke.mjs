@@ -48,15 +48,15 @@ try {
   await assertFails(stranger.ref('rooms/ABC123/players/player-host').set({ uid: 'stranger', playerId: 'player-host', displayName: 'Spoof', connected: true, lastSeen: now }));
   await assertFails(stranger.ref('rooms/ABC123/presence/player-host/connection').set({ uid: 'stranger', connected: true, connectedAt: now, lastSeen: now }));
 
+  await assertSucceeds(host.ref('rooms/ABC123').update({ status: 'PLAYING', canonical: { revision: 0 } }));
   await assertSucceeds(host.ref('rooms/ABC123').update({ coordinator: { coordinatorId: 'host', coordinatorEpoch: 1, leaseUntil: Date.now() - 1, heartbeat: Date.now() } }));
-  await assertFails(host.ref('rooms/ABC123/coordinator').set({ coordinatorId: 'host', coordinatorEpoch: 1, leaseUntil: Date.now() + 12_000, heartbeat: Date.now() }));
+  await assertFails(stranger.ref('rooms/ABC123/coordinator').set({ coordinatorId: 'stranger', coordinatorEpoch: 2, leaseUntil: Date.now() + 12_000, heartbeat: Date.now() }));
   await assertSucceeds(recoverer.ref('reconnectClaims/ABC123/recoverer').set({ hash: 'a'.repeat(64), requestedAt: Date.now() }));
   await assertSucceeds(recoverer.ref('rooms/ABC123/coordinator').get());
   await assertSucceeds(recoverer.ref('rooms/ABC123/coordinator').set({ coordinatorId: 'recoverer', coordinatorEpoch: 2, leaseUntil: Date.now() + 12_000, heartbeat: Date.now() }));
   await assertSucceeds(recoverer.ref('rooms/ABC123/coordinator').set({ coordinatorId: 'host', coordinatorEpoch: 3, leaseUntil: Date.now() + 12_000, heartbeat: Date.now() }));
   await assertSucceeds(recoverer.ref('reconnectClaims/ABC123/recoverer').remove());
 
-  await assertSucceeds(host.ref('rooms/ABC123').update({ status: 'PLAYING', canonical: { revision: 0 } }));
   await assertFails(stranger.ref('rooms/ABC123').get());
   await assertSucceeds(guest.ref('rooms/ABC123/commands/slot-0').set({ submittedByUid: 'guest', submittedAt: Date.now(), command: { commandId: 'guest-command', playerId: 'player-guest', type: 'END_TURN', expectedRevision: 0, createdAt: Date.now(), payload: {} } }));
   await assertFails(guest.ref('rooms/ABC123/commands/slot-0').set({ submittedByUid: 'guest', submittedAt: Date.now(), command: { commandId: 'replacement', playerId: 'player-guest', type: 'END_TURN', expectedRevision: 0, createdAt: Date.now(), payload: {} } }));

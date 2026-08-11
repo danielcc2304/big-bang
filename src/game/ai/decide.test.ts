@@ -12,6 +12,18 @@ const fourPlayerRoles = () => {
 };
 
 describe('estrategia de objetivos de la IA', () => {
+  it('recalcula el descarte con la mano y las vidas actuales', () => {
+    let state = playPhase(fourPlayerRoles(), 'p1');
+    const hand = Array.from({ length: 6 }, (_, index) => makeCard('BANG', `discard-${index}`));
+    state = patchPlayer(state, 'p1', { hand, lives: 3 });
+    state = { ...state, turn: { ...state.turn, phase: 'DISCARD', pendingDiscardCount: 1 } };
+
+    const decision = decideAiCommand(state, 'p1', initialKnowledge(state, 'p1'));
+
+    expect(decision).toMatchObject({ type: 'DISCARD_CARDS' });
+    expect(decision?.type === 'DISCARD_CARDS' && decision.payload.cardIds).toHaveLength(3);
+  });
+
   it('Pedro Ramírez toma la carta superior del descarte durante su robo', () => {
     let state = fourPlayerRoles();
     const discarded = makeCard('BEER', 'ai-pedro-discard');

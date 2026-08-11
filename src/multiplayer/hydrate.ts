@@ -105,7 +105,16 @@ export const hydrateGameState = (state: GameState): GameState => {
   const logsValue = state.logs == null ? [] : requireArray(state.logs, 'logs');
   const logs = logsValue.map((entry, index) => {
     if (!isRecord(entry) || !isString(entry.id, 128) || !isFiniteNumber(entry.revision) || !isString(entry.message, 500) || !isLogTone(entry.tone)) throw new Error(`La sala contiene un registro ${index} invalido.`);
-    return { id: entry.id, revision: entry.revision, message: entry.message, tone: entry.tone } satisfies GameLogEntry;
+    const effectValue = entry.effect;
+    if (effectValue != null && (!isRecord(effectValue) || !['JUDGEMENT', 'REACTION'].includes(String(effectValue.kind)) || !isString(effectValue.playerId, 128) || typeof effectValue.success !== 'boolean' || !isString(effectValue.headline, 80))) throw new Error(`La sala contiene un efecto ${index} invalido.`);
+    const effect = effectValue == null ? undefined : {
+      kind: effectValue.kind as 'JUDGEMENT' | 'REACTION',
+      playerId: effectValue.playerId as string,
+      card: hydrateCard(effectValue.card, `logs[${index}].effect.card`),
+      success: effectValue.success as boolean,
+      headline: effectValue.headline as string,
+    };
+    return { id: entry.id, revision: entry.revision, message: entry.message, tone: entry.tone, ...(effect ? { effect } : {}) } satisfies GameLogEntry;
   });
   const reaction = state.reaction == null ? null : state.reaction;
   if (reaction && (!isRecord(reaction) || !isString(reaction.id, 128) || !['BANG', 'INDIANS', 'DUEL', 'GATLING'].includes(String(reaction.type)) || !isString(reaction.sourcePlayerId, 128) || !isString(reaction.targetPlayerId, 128) || !isFiniteNumber(reaction.requiredCards) || !Number.isInteger(reaction.requiredCards) || reaction.requiredCards < 1 || !isFiniteNumber(reaction.cardsPlayed) || !Number.isInteger(reaction.cardsPlayed) || reaction.cardsPlayed < 0 || !isFiniteNumber(reaction.createdAt))) throw new Error('La sala contiene una reaccion invalida.');
