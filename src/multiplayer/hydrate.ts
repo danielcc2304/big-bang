@@ -1,4 +1,10 @@
-import type { CharacterDraftState, Equipment, GameState, Player, Room, Seat, StoreState } from '../types';
+import type { CharacterDraftState, Equipment, GameCommand, GameState, Player, Room, Seat, StoreState } from '../types';
+
+export const hydrateGameCommand = (command: GameCommand): GameCommand => {
+  if (command.type !== 'REACTION') return command;
+  const payload = command.payload as Extract<GameCommand, { type: 'REACTION' }>['payload'] | undefined;
+  return { ...command, payload: { cardIds: payload?.cardIds ?? [], ...(payload?.takeDamage ? { takeDamage: true as const } : {}) } };
+};
 
 const emptyEquipment = (): Equipment => ({
   weapon: null,

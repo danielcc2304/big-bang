@@ -79,4 +79,35 @@ describe('coordinador online', () => {
     await expect(applyAuthoritativeCommand('ABC123', malformed, 'host', 2, 100)).resolves.toBe(true);
     expect(updated?.commands).toEqual({});
   });
+
+  it('recupera una reacción vacía serializada por Firebase y aplica el daño', async () => {
+    const initial = createGame(Array.from({ length: 4 }, (_, index) => ({ id: `p${index}`, name: `P${index}`, kind: 'HUMAN' as const })), 44);
+    const bang = initial.deck.find((card) => card.name === 'BANG')!;
+    const weapon = initial.deck.find((card) => card.name === 'WINCHESTER')!;
+    const playable = {
+      ...initial,
+      deck: initial.deck.filter((card) => card.id !== bang.id && card.id !== weapon.id),
+      players: initial.players.map((player) => player.id === 'p0' ? { ...player, hand: [bang], equipment: { ...player.equipment, weapon } } : player),
+      turn: { ...initial.turn, currentPlayerId: 'p0', phase: 'PLAY' as const },
+    };
+    const attacked = applyCommand(playable, command(playable, 'p0', 'PLAY_CARD', { cardId: bang.id, targetPlayerId: 'p1' }));
+    if (!attacked.ok) throw new Error(attacked.error.message);
+    const livesBefore = attacked.state.players[1]!.lives;
+    const oldClientCommand = { ...command(attacked.state, 'p1', 'REACTION', { cardIds: [] }), payload: undefined } as unknown as GameCommand;
+    const room = {
+      code: 'ABC123', status: 'PLAYING', createdAt: 1, hostUid: 'host', maxPlayers: 4, characterMode: 'OFFICIAL', seats: {}, players: {}, canonical: attacked.state,
+      commands: { queued: { command: oldClientCommand, submittedByUid: 'guest', submittedAt: 1 } },
+      coordinator: { coordinatorId: 'host', coordinatorEpoch: 2, leaseUntil: 10_000, heartbeat: 1 },
+    } satisfies Room;
+    let updated: Room | undefined;
+    databaseMocks.runTransaction.mockImplementation((_path: string, updater: (value: Room) => Room | undefined) => {
+      updated = updater(room);
+      return Promise.resolve({ committed: updated !== undefined, snapshot: { val: () => updated } });
+    });
+
+    await expect(applyAuthoritativeCommand('ABC123', oldClientCommand, 'host', 2, 100)).resolves.toBe(true);
+    expect(updated?.canonical?.players[1]!.lives).toBe(livesBefore - 1);
+    expect(updated?.canonical?.reaction).toBeNull();
+    expect(updated?.commands).toEqual({});
+  });
 });

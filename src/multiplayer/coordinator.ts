@@ -1,7 +1,7 @@
 import { ref, runTransaction } from 'firebase/database';
 import type { CommandResult, CoordinatorLease, GameCommand, Room } from '../types';
 import { firebaseServices } from '../firebase/client';
-import { hydrateRoom } from './hydrate';
+import { hydrateGameCommand, hydrateRoom } from './hydrate';
 import { applyCommand } from '../game/engine';
 
 export const LEASE_DURATION_MS = 12_000;
@@ -45,11 +45,12 @@ export const applyAuthoritativeCommand = async (roomCode: string, command: GameC
     if (!room?.canonical) return;
     const lease = room.coordinator;
     if (lease.coordinatorId !== uid || lease.coordinatorEpoch !== epoch || lease.leaseUntil <= now) return;
-    const remainingCommands = Object.fromEntries(Object.entries(room.commands ?? {}).filter(([, envelope]) => envelope.command.commandId !== command.commandId));
-    if (room.canonical.processedCommandIds.includes(command.commandId)) return { ...room, commands: remainingCommands };
-    const concurrentDraftChoice = command.type === 'CHARACTER_CHOICE' && room.canonical.turn.phase === 'CHARACTER_CHOICE' && !room.canonical.characterDraft?.chosenByPlayer[command.playerId];
-    if (room.canonical.revision !== command.expectedRevision && !concurrentDraftChoice) return { ...room, commands: remainingCommands };
-    const authoritativeCommand = concurrentDraftChoice ? { ...command, expectedRevision: room.canonical.revision } : command;
+    const hydratedCommand = hydrateGameCommand(command);
+    const remainingCommands = Object.fromEntries(Object.entries(room.commands ?? {}).filter(([, envelope]) => envelope.command.commandId !== hydratedCommand.commandId));
+    if (room.canonical.processedCommandIds.includes(hydratedCommand.commandId)) return { ...room, commands: remainingCommands };
+    const concurrentDraftChoice = hydratedCommand.type === 'CHARACTER_CHOICE' && room.canonical.turn.phase === 'CHARACTER_CHOICE' && !room.canonical.characterDraft?.chosenByPlayer[hydratedCommand.playerId];
+    if (room.canonical.revision !== hydratedCommand.expectedRevision && !concurrentDraftChoice) return { ...room, commands: remainingCommands };
+    const authoritativeCommand = concurrentDraftChoice ? { ...hydratedCommand, expectedRevision: room.canonical.revision } : hydratedCommand;
     let applied: CommandResult;
     try {
       applied = applyCommand(room.canonical, authoritativeCommand);

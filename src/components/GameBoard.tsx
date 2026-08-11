@@ -119,8 +119,8 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   };
 
   const toggleReaction = (cardId: string): void => setReactionCards((current) => current.includes(cardId) ? current.filter((id) => id !== cardId) : [...current, cardId]);
-  const resolveReaction = (cardIds: readonly string[]): void => {
-    dispatch(command(state, viewerId, 'REACTION', { cardIds }));
+  const resolveReaction = (cardIds: readonly string[], takeDamage = false): void => {
+    dispatch(command(state, viewerId, 'REACTION', { cardIds, ...(takeDamage ? { takeDamage: true as const } : {}) }));
     sound.play(cardIds.length > 0 ? 'missed' : 'damage');
   };
 
@@ -194,7 +194,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
       )}
 
       {state.reaction?.targetPlayerId === viewerId && (
-        <div className="modal-backdrop"><section className="game-modal" role="dialog" aria-modal="true"><span className="eyebrow">REACCIÓN</span><h2>{state.reaction.type}</h2><p>Necesitas {state.reaction.requiredCards - state.reaction.cardsPlayed} carta(s) válida(s). Si no tienes ninguna, pulsa <b>Recibir daño</b> para continuar.</p><div className="card-rail modal-rail">{viewer.hand.filter((card) => state.reaction?.type === 'INDIANS' || state.reaction?.type === 'DUEL' ? card.name === 'BANG' || viewer.character.name === 'Calamity Janet' && card.name === 'MISSED' : card.name === 'MISSED' || viewer.character.name === 'Calamity Janet' && card.name === 'BANG').map((card) => <CardView key={card.id} card={card} selected={reactionCards.includes(card.id)} onClick={() => toggleReaction(card.id)} />)}</div><div className="modal-actions"><button className="danger-action" onClick={() => resolveReaction([])}>Recibir daño</button><button className="primary-action" disabled={reactionCards.length < state.reaction.requiredCards - state.reaction.cardsPlayed} onClick={() => resolveReaction(reactionCards)}>Responder</button></div></section></div>
+        <div className="modal-backdrop"><section className="game-modal" role="dialog" aria-modal="true"><span className="eyebrow">REACCIÓN</span><h2>{state.reaction.type}</h2><p>Necesitas {state.reaction.requiredCards - state.reaction.cardsPlayed} carta(s) válida(s). Si no tienes ninguna, pulsa <b>Recibir daño</b> para continuar.</p><div className="card-rail modal-rail">{viewer.hand.filter((card) => state.reaction?.type === 'INDIANS' || state.reaction?.type === 'DUEL' ? card.name === 'BANG' || viewer.character.name === 'Calamity Janet' && card.name === 'MISSED' : card.name === 'MISSED' || viewer.character.name === 'Calamity Janet' && card.name === 'BANG').map((card) => <CardView key={card.id} card={card} selected={reactionCards.includes(card.id)} onClick={() => toggleReaction(card.id)} />)}</div><div className="modal-actions"><button className="danger-action" onClick={() => resolveReaction([], true)}>Recibir daño</button><button className="primary-action" disabled={reactionCards.length < state.reaction.requiredCards - state.reaction.cardsPlayed} onClick={() => resolveReaction(reactionCards)}>Responder</button></div></section></div>
       )}
 
       {state.storeState?.currentPlayerId === viewerId && (

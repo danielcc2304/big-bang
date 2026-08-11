@@ -67,8 +67,10 @@ const resolveReaction = (state: GameState, command: Extract<GameCommand, { type:
   if (!reaction) return fail(state, 'NO_REACTION', 'No hay una reacción pendiente.');
   if (reaction.targetPlayerId !== command.playerId) return fail(state, 'NOT_YOUR_REACTION', 'La reacción pertenece a otro jugador.');
   const player = playerById(state, command.playerId)!;
-  const cards = player.hand.filter((card) => command.payload.cardIds.includes(card.id));
-  if (!hasAllCards(player, command.payload.cardIds)) return fail(state, 'CARD_NOT_OWNED', 'Alguna carta ya no está en tu mano.');
+  const cardIds = command.payload?.cardIds ?? [];
+  if (command.payload?.takeDamage && cardIds.length > 0) return fail(state, 'INVALID_REACTION', 'No puedes responder y recibir daño a la vez.');
+  const cards = player.hand.filter((card) => cardIds.includes(card.id));
+  if (!hasAllCards(player, cardIds)) return fail(state, 'CARD_NOT_OWNED', 'Alguna carta ya no está en tu mano.');
   const accepted = reaction.type === 'INDIANS' || reaction.type === 'DUEL' ? ['BANG'] : ['MISSED'];
   const valid = cards.every((card) => accepted.includes(card.name) || player.character.name === 'Calamity Janet' && (card.name === 'BANG' || card.name === 'MISSED'));
   if (!valid) return fail(state, 'INVALID_REACTION', 'Esas cartas no resuelven esta reacción.');
