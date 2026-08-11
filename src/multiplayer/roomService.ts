@@ -279,9 +279,12 @@ const configurePresence = async (code: string, playerId: string, uid: string): P
   const presence = ref(services.database, `rooms/${code}/players/${playerId}`);
   const connectionId = secureId('connection');
   const connection = ref(services.database, `rooms/${code}/presence/${playerId}/${connectionId}`);
+  const connectedAt = serverNow();
   try {
-    await onDisconnect(connection).update({ connected: false, lastSeen: serverTimestamp() });
-    await set(connection, { uid, connected: true, connectedAt: serverTimestamp(), lastSeen: serverTimestamp() });
+    // Firebase authorizes onDisconnect when it is registered. A partial update
+    // cannot create a presence record because the rules require uid/connectedAt.
+    await onDisconnect(connection).set({ uid, connected: false, connectedAt, lastSeen: serverTimestamp() });
+    await set(connection, { uid, connected: true, connectedAt, lastSeen: serverTimestamp() });
     await update(presence, { connected: true, lastSeen: serverTimestamp(), uid });
     return connectionId;
   } catch (error) {

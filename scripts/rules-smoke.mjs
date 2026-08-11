@@ -41,6 +41,11 @@ try {
   await assertFails(guest.ref('rooms/ABC123/seats/2').set({ number: 2, playerId: 'player-guest-2', ownerUid: 'guest', reconnectHash: null, isBot: false, joinedAt: now }));
   await assertFails(guest.ref('rooms/ABC123/seats/4').set({ number: 4, playerId: 'player-overflow', ownerUid: 'guest-2', reconnectHash: null, isBot: false, joinedAt: now }));
   await assertSucceeds(guest.ref('rooms/ABC123/players/player-guest').set({ uid: 'guest', playerId: 'player-guest', displayName: 'Guest', connected: true, lastSeen: now }));
+  const partialDisconnect = guest.ref('rooms/ABC123/presence/player-guest/partial-disconnect').onDisconnect();
+  await assertFails(partialDisconnect.update({ connected: false, lastSeen: { '.sv': 'timestamp' } }));
+  const fullDisconnect = guest.ref('rooms/ABC123/presence/player-guest/full-disconnect').onDisconnect();
+  await assertSucceeds(fullDisconnect.set({ uid: 'guest', connected: false, connectedAt: now, lastSeen: { '.sv': 'timestamp' } }));
+  await fullDisconnect.cancel();
   await assertFails(guest.ref('rooms/ABC123/players/player-guest').update({ uid: 'spoofed' }));
   await assertFails(guest.ref('rooms/ABC123/players/player-guest').update({ lastSeen: Date.now() + 60_000 }));
   await assertSucceeds(guest.ref('rooms/ABC123/presence/player-guest/connection').set({ uid: 'guest', connected: true, connectedAt: now, lastSeen: now }));
