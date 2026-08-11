@@ -102,4 +102,25 @@ describe('GameBoard', () => {
     fireEvent.click(board.getByRole('button', { name: /Barril/ }));
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'PLAY_CARD', payload: { cardId: cat.id, targetPlayerId: target.id, targetCardId: barrel.id } }));
   });
+
+  it('envía una señal explícita al aceptar el daño de un BANG online', () => {
+    const base = createGame(setups, 43);
+    const viewer = base.players[0]!;
+    const source = base.players[1]!;
+    const unusable = base.deck.find((card) => card.name === 'BANG')!;
+    const state = {
+      ...base,
+      deck: base.deck.filter((card) => card.id !== unusable.id),
+      players: base.players.map((player) => player.id === viewer.id ? { ...player, hand: [unusable] } : player),
+      reaction: { id: 'reaction-test', type: 'BANG' as const, sourcePlayerId: source.id, targetPlayerId: viewer.id, requiredCards: 1, cardsPlayed: 0, createdAt: 1 },
+      turn: { ...base.turn, currentPlayerId: source.id, phase: 'WAITING_REACTION' as const },
+    };
+    const dispatch = vi.fn(() => true);
+    const view = render(<GameBoard state={state} viewerId={viewer.id} error={null} dispatch={dispatch} onExit={() => undefined} syncLabel="ONLINE" />);
+    const board = within(view.container);
+
+    fireEvent.click(board.getByRole('button', { name: 'Recibir daño' }));
+
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'REACTION', payload: { cardIds: [], takeDamage: true } }));
+  });
 });

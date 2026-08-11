@@ -139,7 +139,7 @@ export type GameCommand =
   | (CommandBase & { readonly type: 'SELECT_TARGET'; readonly payload: { readonly targetPlayerId: string } })
   | (CommandBase & { readonly type: 'END_TURN'; readonly payload: Record<string, never> })
   | (CommandBase & { readonly type: 'DISCARD_CARDS'; readonly payload: { readonly cardIds: readonly string[] } })
-  | (CommandBase & { readonly type: 'REACTION'; readonly payload: { readonly cardIds: readonly string[] } })
+  | (CommandBase & { readonly type: 'REACTION'; readonly payload: { readonly cardIds?: readonly string[]; readonly takeDamage?: true } })
   | (CommandBase & { readonly type: 'STORE_PICK'; readonly payload: { readonly cardId: string } })
   | (CommandBase & { readonly type: 'CHARACTER_CHOICE'; readonly payload: { readonly characterName: CharacterName } })
   | (CommandBase & { readonly type: 'USE_CHARACTER_ABILITY'; readonly payload: { readonly cardIds?: readonly string[]; readonly targetPlayerId?: string } })
