@@ -1,6 +1,7 @@
 import { ref, runTransaction } from 'firebase/database';
 import type { CoordinatorLease, GameCommand, Room } from '../types';
 import { firebaseServices } from '../firebase/client';
+import { hydrateRoom } from './hydrate';
 import { applyCommand } from '../game/engine';
 
 export const LEASE_DURATION_MS = 12_000;
@@ -39,7 +40,8 @@ export const renewCoordinatorLease = async (roomCode: string, uid: string, epoch
 export const applyAuthoritativeCommand = async (roomCode: string, command: GameCommand, uid: string, epoch: number, now = Date.now()): Promise<boolean> => {
   const services = firebaseServices();
   if (!services) throw new Error('Firebase no está configurado.');
-  const result = await runTransaction(ref(services.database, `rooms/${roomCode}`), (room: Room | null) => {
+  const result = await runTransaction(ref(services.database, `rooms/${roomCode}`), (value: Room | null) => {
+    const room = value ? hydrateRoom(value) : null;
     if (!room?.canonical) return;
     const lease = room.coordinator;
     if (lease.coordinatorId !== uid || lease.coordinatorEpoch !== epoch || lease.leaseUntil <= now) return;
