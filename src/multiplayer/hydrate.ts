@@ -1,4 +1,4 @@
-import type { Equipment, GameState, Player, Room, Seat, StoreState } from '../types';
+import type { CharacterDraftState, Equipment, GameState, Player, Room, Seat, StoreState } from '../types';
 
 const emptyEquipment = (): Equipment => ({
   weapon: null,
@@ -23,6 +23,12 @@ const hydrateStoreState = (storeState: StoreState | null | undefined): StoreStat
   pickedBy: storeState.pickedBy ?? {},
 }) : null;
 
+const hydrateCharacterDraft = (draft: CharacterDraftState | null | undefined): CharacterDraftState | null => draft ? ({
+  ...draft,
+  optionsByPlayer: draft.optionsByPlayer ?? {},
+  chosenByPlayer: draft.chosenByPlayer ?? {},
+}) : null;
+
 export const hydrateGameState = (state: GameState): GameState => ({
   ...state,
   players: (state.players ?? []).map(hydratePlayer),
@@ -31,6 +37,7 @@ export const hydrateGameState = (state: GameState): GameState => ({
   reaction: state.reaction ?? null,
   storeState: hydrateStoreState(state.storeState),
   multiAction: state.multiAction ?? null,
+  characterDraft: hydrateCharacterDraft(state.characterDraft),
   processedCommandIds: state.processedCommandIds ?? [],
   logs: state.logs ?? [],
   winner: state.winner ?? null,

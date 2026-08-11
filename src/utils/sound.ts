@@ -7,15 +7,18 @@ const EFFECTS: Record<SoundName, readonly [number, number, OscillatorType]> = {
   victory: [880, .45, 'triangle'], defeat: [190, .5, 'sawtooth'], connect: [560, .15, 'sine'], error: [125, .16, 'square'],
 };
 
-// Original pentatonic saloon loop. Keeping it synthesized avoids shipping copyrighted audio.
-const WESTERN_MELODY = [659, 0, 784, 659, 587, 0, 523, 587, 659, 0, 784, 880, 784, 659, 587, 0] as const;
-const WESTERN_BASS = [131, 131, 117, 98] as const;
+// Original, restrained saloon loop. It stays synthesized so the project ships no licensed recording.
+const WESTERN_MELODY = [330, 392, 440, 392, 330, 294, 262, 294, 330, 392, 440, 494, 440, 392, 330, 294] as const;
+const WESTERN_BASS = [82, 98, 110, 98] as const;
 
 export class SoundService {
   private context: AudioContext | null = null;
   private effectsGain: GainNode | null = null;
   private musicGain: GainNode | null = null;
   private musicTimer: number | null = null;
+  private musicStart: Promise<void> | null = null;
+  private musicGeneration = 0;
+  private lastEffectAt = new Map<SoundName, number>();
   enabled = localStorage.getItem('bang:sound') !== 'off';
   musicEnabled = localStorage.getItem('bang:music') !== 'off';
   volume = 0.45;
@@ -35,7 +38,7 @@ export class SoundService {
       this.musicGain.connect(this.context.destination);
     }
     this.effectsGain.gain.value = this.volume;
-    this.musicGain.gain.value = this.volume * .22;
+    this.musicGain.gain.value = this.musicTimer !== null || this.musicStart !== null ? this.volume * .12 : 0;
     if (this.context.state === 'suspended') await this.context.resume();
     return this.context.state === 'running';
   }
@@ -54,6 +57,9 @@ export class SoundService {
 
   play(name: SoundName): void {
     if (!this.enabled) return;
+    const now = performance.now();
+    if (now - (this.lastEffectAt.get(name) ?? -Infinity) < 70) return;
+    this.lastEffectAt.set(name, now);
     void this.unlock().then((ready) => {
       if (!ready || !this.context || !this.effectsGain) return;
       const [frequency, duration, type] = EFFECTS[name];
@@ -63,25 +69,34 @@ export class SoundService {
 
   async startMusic(): Promise<void> {
     if (!this.enabled || !this.musicEnabled || this.musicTimer !== null) return;
-    if (!await this.unlock() || !this.context || !this.musicGain) return;
+    if (this.musicStart) return this.musicStart;
+    const generation = ++this.musicGeneration;
+    this.musicStart = this.beginMusic(generation).finally(() => { this.musicStart = null; });
+    return this.musicStart;
+  }
+
+  private async beginMusic(generation: number): Promise<void> {
+    if (!await this.unlock() || !this.context || !this.musicGain || generation !== this.musicGeneration || !this.enabled || !this.musicEnabled) return;
+    this.musicGain.gain.value = this.volume * .12;
     const scheduleBar = (): void => {
-      if (!this.context || !this.musicGain) return;
+      if (!this.context || !this.musicGain || generation !== this.musicGeneration) return;
       const context = this.context;
       const musicGain = this.musicGain;
-      const eighth = 60 / 112 / 2;
+      const eighth = 60 / 104 / 2;
       const start = context.currentTime + .04;
       WESTERN_MELODY.forEach((frequency, index) => {
-        if (frequency) this.scheduleTone(frequency, start + index * eighth, eighth * .72, 'triangle', .16, musicGain);
+        this.scheduleTone(frequency, start + index * eighth, eighth * .55, 'triangle', .08, musicGain);
       });
       WESTERN_BASS.forEach((frequency, index) => {
-        this.scheduleTone(frequency, start + index * eighth * 4, eighth * 2.4, 'sine', .22, musicGain);
+        this.scheduleTone(frequency, start + index * eighth * 4, eighth * 2.1, 'sine', .12, musicGain);
       });
     };
     scheduleBar();
-    this.musicTimer = window.setInterval(scheduleBar, 60 / 112 / 2 * 16 * 1_000);
+    this.musicTimer = window.setInterval(scheduleBar, 60 / 104 / 2 * 16 * 1_000);
   }
 
   stopMusic(): void {
+    this.musicGeneration += 1;
     if (this.musicTimer !== null) window.clearInterval(this.musicTimer);
     this.musicTimer = null;
     if (this.musicGain) this.musicGain.gain.value = 0;

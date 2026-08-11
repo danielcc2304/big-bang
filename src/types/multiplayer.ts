@@ -1,5 +1,7 @@
 import type { GameCommand, GameState } from './game';
 
+export type CharacterMode = 'OFFICIAL' | 'DRAFT_TWO';
+
 export interface Seat {
   readonly number: number;
   readonly playerId: string;
@@ -30,7 +32,7 @@ export interface Room {
   readonly createdAt: number;
   readonly hostUid: string;
   readonly maxPlayers: 4 | 5 | 6 | 7;
-  readonly characterMode: 'OFFICIAL' | 'DRAFT_TWO';
+  readonly characterMode: CharacterMode;
   readonly seats: Readonly<Record<string, Seat>>;
   readonly players: Readonly<Record<string, OnlinePlayer>>;
   readonly coordinator: CoordinatorLease;

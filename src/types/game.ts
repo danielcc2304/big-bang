@@ -30,6 +30,11 @@ export interface Character {
   readonly ability: string;
 }
 
+export interface CharacterDraftState {
+  readonly optionsByPlayer: Readonly<Record<string, readonly [CharacterName, CharacterName]>>;
+  readonly chosenByPlayer: Readonly<Record<string, CharacterName>>;
+}
+
 export interface Equipment {
   readonly weapon: Card | null;
   readonly barrel: Card | null;
@@ -115,6 +120,7 @@ export interface GameState {
   readonly reaction: Reaction | null;
   readonly storeState: StoreState | null;
   readonly multiAction: MultiActionState | null;
+  readonly characterDraft: CharacterDraftState | null;
   readonly processedCommandIds: readonly string[];
   readonly logs: readonly GameLogEntry[];
   readonly winner: Winner | null;

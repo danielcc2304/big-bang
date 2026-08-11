@@ -43,3 +43,15 @@
   .online-actions{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .online-actions button{padding-inline:10px}
 }
+
+.online-form select{display:block;width:100%;margin:7px 0 14px;background:#e4d4b2;color:#28170e;border:1px solid #9e8765;border-radius:2px;padding:12px 13px}
+.character-ability{display:block;max-width:240px;margin:5px auto 0;font:9px/1.25 Georgia;color:#68452e;text-align:center}
+.character-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+.character-choice-card{min-height:250px;border:2px solid #5c351c;background:linear-gradient(155deg,#f0dfb3,#c89b58);color:#321b0e;padding:24px 20px;text-align:left;box-shadow:0 10px 24px #3d1d0c33;transition:.18s}
+.character-choice-card:hover{transform:translateY(-4px);border-color:#a53423;box-shadow:0 14px 30px #3d1d0c55}
+.character-choice-card>span{color:#a52f20;font-size:19px;letter-spacing:2px}
+.character-choice-card h3{font:25px Rye;margin:10px 0}
+.character-choice-card p{min-height:84px;margin:0;font:14px/1.45 Georgia;color:#5e412d}
+.character-choice-card b{display:block;margin-top:15px;color:#9d2e1e;text-transform:uppercase;letter-spacing:.12em;font-size:10px}
+.lobby-variant{display:inline-block;border:1px solid #6f5033;background:#20110c;padding:9px 12px!important;color:#bca98f!important;font:11px 'DM Sans'!important}.lobby-variant b{color:#dfba72}
+@media(max-width:560px){.character-ability{font-size:8px;line-height:1.15;max-height:28px;overflow:hidden}.character-choice-grid{grid-template-columns:1fr}.character-choice-card{min-height:0;padding:18px}.character-choice-card p{min-height:0}.game-modal.wide:has(.character-choice-grid){max-height:94svh}}
