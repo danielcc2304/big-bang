@@ -51,6 +51,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   const topDiscard = state.discard.at(-1);
   const topDiscardDefinition = topDiscard ? CARD_CATALOG[topDiscard.name] : null;
   const isHumanTurn = state.turn.currentPlayerId === viewerId && viewer.alive;
+  const canChoosePedroDraw = isHumanTurn && state.turn.phase === 'DRAW' && viewer.character.name === 'Pedro Ramirez' && Boolean(topDiscard);
   const canPlay = isHumanTurn && state.turn.phase === 'PLAY' && !state.reaction && !state.storeState;
 
   useEffect(() => { setReactionCards([]); }, [state.reaction?.id]);
@@ -76,8 +77,8 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   useEffect(() => {
     if (syncLabel !== 'LOCAL') return;
     if (state.turn.currentPlayerId === viewerId && state.turn.phase === 'TURN_START') dispatch(command(state, viewerId, 'RESOLVE_TURN_START', {}));
-    else if (state.turn.currentPlayerId === viewerId && state.turn.phase === 'DRAW') dispatch(command(state, viewerId, 'DRAW_CARDS', {}));
-  }, [dispatch, state, syncLabel, viewerId]);
+    else if (state.turn.currentPlayerId === viewerId && state.turn.phase === 'DRAW' && !canChoosePedroDraw) dispatch(command(state, viewerId, 'DRAW_CARDS', {}));
+  }, [canChoosePedroDraw, dispatch, state, syncLabel, viewerId]);
 
   const opponents = useMemo(() => state.players.filter((player) => player.id !== viewerId), [state.players, viewerId]);
 
@@ -166,6 +167,10 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
 
       {state.turn.phase === 'CHARACTER_CHOICE' && (
         <div className="modal-backdrop"><section className="game-modal wide" role="dialog" aria-modal="true"><span className="eyebrow">{syncLabel === 'LOCAL' ? 'VARIANTE · ELIGE TU PERSONAJE' : 'VARIANTE · ELECCIÓN SIMULTÁNEA'}</span>{!viewerHasChosenCharacter && characterOptions ? <><h2>Elige tu pistolero</h2><p>{syncLabel === 'LOCAL' ? 'Escoge uno de los dos personajes aleatorios. Su habilidad será pública durante toda la partida.' : 'Todos podéis elegir al mismo tiempo. Tu personaje y su habilidad serán públicos durante toda la partida.'}</p><div className="character-choice-grid">{characterOptions.map((name) => { const character = characterByName(name); return <button key={name} className="character-choice-card" onClick={() => dispatch(command(state, viewerId, 'CHARACTER_CHOICE', { characterName: name }))}><span>{'♥'.repeat(character.lives)}</span><h3>{character.name}</h3><p>{character.ability}</p><b>Elegir</b></button>; })}</div></> : <><h2>Elección guardada</h2><p>Esperando a que termine el resto de la cuadrilla…</p></>}</section></div>
+      )}
+
+      {canChoosePedroDraw && topDiscard && topDiscardDefinition && (
+        <div className="modal-backdrop"><section className="game-modal" role="dialog" aria-modal="true"><span className="eyebrow">HABILIDAD · PEDRO RAMÍREZ</span><h2>¿De dónde robas la primera?</h2><p>La carta superior del descarte es <b>{topDiscardDefinition.label}</b>. La segunda carta siempre vendrá del mazo.</p><div className="modal-actions"><button onClick={() => dispatch(command(state, viewerId, 'DRAW_CARDS', { firstCardSource: 'DECK' }))}>Robar 2 del mazo</button><button className="primary-action" onClick={() => dispatch(command(state, viewerId, 'DRAW_CARDS', { firstCardSource: 'DISCARD' }))}>Tomar {topDiscardDefinition.label}</button></div></section></div>
       )}
 
       {state.reaction?.targetPlayerId === viewerId && (

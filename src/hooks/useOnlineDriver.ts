@@ -53,10 +53,12 @@ export const useOnlineDriver = (code: string, room: Room | null, uid: string): v
     if (Object.keys(room.commands ?? {}).length > 0) return;
     const state = room.canonical;
     if (!state.winner && (state.turn.phase === 'TURN_START' || state.turn.phase === 'DRAW')) {
+      const current = state.players.find((player) => player.id === state.turn.currentPlayerId);
+      const automatedDrawActor = state.turn.phase === 'DRAW' && automatedActorId(room) === current?.id;
+      if (state.turn.phase === 'DRAW' && current?.kind === 'HUMAN' && current.character.name === 'Pedro Ramirez' && state.discard.length > 0 && !automatedDrawActor) return;
       const automatic = state.turn.phase === 'TURN_START'
         ? command(state, state.turn.currentPlayerId, 'RESOLVE_TURN_START', {})
-        : command(state, state.turn.currentPlayerId, 'DRAW_CARDS', {});
-      const current = state.players.find((player) => player.id === state.turn.currentPlayerId);
+        : command(state, state.turn.currentPlayerId, 'DRAW_CARDS', { firstCardSource: current?.character.name === 'Pedro Ramirez' && state.discard.length > 0 ? 'DISCARD' : 'DECK' });
       const timer = window.setTimeout(() => safely(applyAuthoritativeCommand(code, automatic, uid, room.coordinator.coordinatorEpoch)), current?.kind === 'AI' ? aiDecisionDelay(state) : 180);
       return () => window.clearTimeout(timer);
     }
