@@ -3,6 +3,7 @@ import type { Card, GameCommand, GameState, Player } from '../types';
 import { command } from '../game/engine';
 import { CARD_CATALOG } from '../game/cards/catalog';
 import { distanceBetween } from '../game/rules/distance';
+import { characterByName } from '../game/characters/characters';
 import { sound } from '../utils/sound';
 import { CardView } from './CardView';
 import { PlayerPanel } from './PlayerPanel';
@@ -67,9 +68,10 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   }, [state.winner, viewer.role]);
   useEffect(() => { if (error) sound.play('error'); }, [error]);
   useEffect(() => {
+    if (syncLabel !== 'LOCAL') return;
     if (state.turn.currentPlayerId === viewerId && state.turn.phase === 'TURN_START') dispatch(command(state, viewerId, 'RESOLVE_TURN_START', {}));
     else if (state.turn.currentPlayerId === viewerId && state.turn.phase === 'DRAW') dispatch(command(state, viewerId, 'DRAW_CARDS', {}));
-  }, [dispatch, state, viewerId]);
+  }, [dispatch, state, syncLabel, viewerId]);
 
   const opponents = useMemo(() => state.players.filter((player) => player.id !== viewerId), [state.players, viewerId]);
 
@@ -106,7 +108,8 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
     dispatch(command(state, viewerId, 'DISCARD_CARDS', { cardIds: discards }));
   };
 
-  const status = state.winner ? 'Partida terminada' : state.reaction ? `${state.players.find((p) => p.id === state.reaction?.targetPlayerId)?.name ?? ''} debe responder` : state.storeState ? `Almacén: elige ${state.players.find((p) => p.id === state.storeState?.currentPlayerId)?.name ?? ''}` : `${state.players.find((p) => p.id === state.turn.currentPlayerId)?.name ?? ''} · ${state.turn.phase}`;
+  const status = state.winner ? 'Partida terminada' : state.turn.phase === 'CHARACTER_CHOICE' ? `${state.players.find((p) => p.id === state.turn.currentPlayerId)?.name ?? ''} elige personaje` : state.reaction ? `${state.players.find((p) => p.id === state.reaction?.targetPlayerId)?.name ?? ''} debe responder` : state.storeState ? `Almacén: elige ${state.players.find((p) => p.id === state.storeState?.currentPlayerId)?.name ?? ''}` : `${state.players.find((p) => p.id === state.turn.currentPlayerId)?.name ?? ''} · ${state.turn.phase}`;
+  const characterOptions = state.characterDraft?.optionsByPlayer[viewerId];
 
   return (
     <main className="game-shell" onPointerDown={() => void sound.unlock()}>
@@ -151,6 +154,10 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
       </footer>
 
       <aside className="history-panel"><h2>Últimos movimientos</h2>{state.logs.slice(-8).reverse().map((entry) => <p key={entry.id} data-tone={entry.tone}>{entry.message}</p>)}</aside>
+
+      {state.turn.phase === 'CHARACTER_CHOICE' && (
+        <div className="modal-backdrop"><section className="game-modal wide" role="dialog" aria-modal="true"><span className="eyebrow">VARIANTE · DOS PERSONAJES</span>{state.turn.currentPlayerId === viewerId && characterOptions ? <><h2>Elige tu pistolero</h2><p>Compara sus vidas y habilidades. Tu personaje y su habilidad serán públicos durante toda la partida.</p><div className="character-choice-grid">{characterOptions.map((name) => { const character = characterByName(name); return <button key={name} className="character-choice-card" onClick={() => dispatch(command(state, viewerId, 'CHARACTER_CHOICE', { characterName: name }))}><span>{'♥'.repeat(character.lives)}</span><h3>{character.name}</h3><p>{character.ability}</p><b>Elegir</b></button>; })}</div></> : <><h2>La cuadrilla está eligiendo</h2><p>Ahora decide {state.players.find((player) => player.id === state.turn.currentPlayerId)?.name}. Enseguida volverá el ruido de pólvora.</p></>}</section></div>
+      )}
 
       {state.reaction?.targetPlayerId === viewerId && (
         <div className="modal-backdrop"><section className="game-modal" role="dialog" aria-modal="true"><span className="eyebrow">REACCIÓN</span><h2>{state.reaction.type}</h2><p>Necesitas {state.reaction.requiredCards - state.reaction.cardsPlayed} carta(s) válida(s).</p><div className="card-rail modal-rail">{viewer.hand.filter((card) => state.reaction?.type === 'INDIANS' || state.reaction?.type === 'DUEL' ? card.name === 'BANG' || viewer.character.name === 'Calamity Janet' && card.name === 'MISSED' : card.name === 'MISSED' || viewer.character.name === 'Calamity Janet' && card.name === 'BANG').map((card) => <CardView key={card.id} card={card} selected={reactionCards.includes(card.id)} onClick={() => toggleReaction(card.id)} />)}</div><div className="modal-actions"><button onClick={() => resolveReaction([])}>Recibir daño</button><button className="primary-action" disabled={reactionCards.length < state.reaction.requiredCards - state.reaction.cardsPlayed} onClick={() => resolveReaction(reactionCards)}>Responder</button></div></section></div>

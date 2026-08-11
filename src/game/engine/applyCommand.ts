@@ -285,9 +285,28 @@ const handleCommand = (state: GameState, command: GameCommand): CommandResult =>
     }
     case 'CHARACTER_CHOICE': {
       if (state.turn.phase !== 'CHARACTER_CHOICE') return fail(state, 'NOT_CHARACTER_CHOICE', 'La elección de personaje ya terminó.');
+      if (state.turn.currentPlayerId !== player.id) return fail(state, 'NOT_YOUR_CHARACTER_CHOICE', 'Ahora elige otro jugador.');
+      const draft = state.characterDraft;
+      if (!draft) return fail(state, 'NO_CHARACTER_DRAFT', 'No hay una selección de personajes activa.');
+      if (draft.chosenByPlayer[player.id]) return fail(state, 'CHARACTER_ALREADY_CHOSEN', 'Ya elegiste personaje.');
+      const options = draft.optionsByPlayer[player.id];
+      if (!options?.includes(command.payload.characterName)) return fail(state, 'CHARACTER_NOT_OFFERED', 'Ese personaje no está entre tus dos opciones.');
       const chosen = characterByName(command.payload.characterName);
       const maxLives = chosen.lives + (player.role === 'SHERIFF' ? 1 : 0);
-      return { ok: true, state: replacePlayer(state, { ...player, character: chosen, maxLives, lives: maxLives }) };
+      const chosenByPlayer = { ...draft.chosenByPlayer, [player.id]: chosen.name };
+      let next = replacePlayer(state, { ...player, character: chosen, maxLives, lives: maxLives });
+      const pending = next.players.find((candidate) => !chosenByPlayer[candidate.id]);
+      if (pending) return { ok: true, state: { ...next, characterDraft: { ...draft, chosenByPlayer }, turn: { ...next.turn, currentPlayerId: pending.id } } };
+
+      let deck = next.deck;
+      const players = next.players.map((candidate) => {
+        const hand = deck.slice(0, candidate.maxLives);
+        deck = deck.slice(candidate.maxLives);
+        return { ...candidate, hand };
+      });
+      const sheriff = players.find((candidate) => candidate.role === 'SHERIFF')!;
+      next = { ...next, players, deck, characterDraft: null, turn: { number: 1, currentPlayerId: sheriff.id, phase: 'TURN_START', pendingDiscardCount: 0 } };
+      return { ok: true, state: log(next, 'La cuadrilla ha elegido sus personajes.', 'SYSTEM') };
     }
     case 'SELECT_TARGET': return fail(state, 'SELECTION_IS_CLIENT_SIDE', 'La selección se incluye en el comando de carta.');
   }

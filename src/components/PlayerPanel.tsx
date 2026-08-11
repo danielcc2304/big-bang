@@ -21,6 +21,7 @@ export const PlayerPanel = ({ player, state, viewerId, targetable, onSelect, onI
         <span className="role-tag">{role === 'SECRET' ? 'ROL SECRETO' : role}</span>
         <span className="player-name">{player.name}</span>
         <span className="character-name">{player.character.name}</span>
+        <span className="character-ability">{player.character.ability}</span>
         <span className="life-row" aria-label={`${player.lives} vidas`}>{'♥'.repeat(Math.max(0, player.lives))}<i>{player.lives}/{player.maxLives}</i></span>
         <span className="player-meta">{player.hand.length} cartas · distancia {distanceBetween(state, viewerId, player.id)}</span>
       </button>

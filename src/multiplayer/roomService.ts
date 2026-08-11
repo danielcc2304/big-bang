@@ -155,7 +155,7 @@ export const startOnlineGame = async (code: string, uid: string): Promise<void> 
       nextSeats[seat] = { number: seat, playerId, ownerUid: null, reconnectHash: null, isBot: true, joinedAt: Date.now() };
       setups.push({ id: playerId, name: ['Coyote', 'Sombra', 'Maverick', 'Ruby', 'Doc', 'Rattler'][seat - humanSeats.length] ?? `Bot ${seat}`, kind: 'AI' });
     }
-    return { ...room, status: 'PLAYING', seats: nextSeats, canonical: createGame(setups, Date.now()) };
+    return { ...room, status: 'PLAYING', seats: nextSeats, canonical: createGame(setups, Date.now(), room.characterMode) };
   }, { applyLocally: false });
   if (!result.committed) throw new Error('Solo el host puede iniciar una sala abierta.');
 };

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { GameCommand, GameState } from '../types';
-import { decideAiCommand, initialKnowledge } from '../game/ai';
+import { aiDecisionDelay, decideAiCommand, initialKnowledge } from '../game/ai';
 import { applyCommand, createGame, type PlayerSetup } from '../game/engine';
 
 export interface LocalGameController {
@@ -34,7 +34,7 @@ export const useLocalGame = (setups: readonly PlayerSetup[], seed: number): Loca
     const timer = window.setTimeout(() => {
       const aiCommand = decideAiCommand(state, active.id, knowledge[active.id] ?? initialKnowledge(state, active.id));
       if (aiCommand) dispatch(aiCommand);
-    }, 420);
+    }, aiDecisionDelay(state));
     return () => window.clearTimeout(timer);
   }, [dispatch, knowledge, state]);
 

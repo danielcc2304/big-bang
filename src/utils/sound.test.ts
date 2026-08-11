@@ -64,4 +64,14 @@ describe('SoundService', () => {
     service.stopMusic();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('does not start overlapping loops when two gestures unlock audio together', async () => {
+    vi.useFakeTimers();
+    const service = new SoundService();
+
+    await Promise.all([service.startMusic(), service.startMusic()]);
+
+    expect(vi.getTimerCount()).toBe(1);
+    service.stopMusic();
+  });
 });
