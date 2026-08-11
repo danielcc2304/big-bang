@@ -32,11 +32,11 @@ const createReaction = (state: GameState, type: Reaction['type'], sourceId: stri
   turn: { ...state.turn, phase: 'WAITING_REACTION' },
 });
 
-const barrelCheck = (state: GameState, target: Player): { readonly state: GameState; readonly successes: number } => {
+const barrelCheck = (state: GameState, target: Player, requiredSuccesses: number): { readonly state: GameState; readonly successes: number } => {
   const checks = (target.equipment.barrel ? 1 : 0) + (target.character.name === 'Jourdonnais' ? 1 : 0);
   let next = state;
   let successes = 0;
-  for (let index = 0; index < checks; index += 1) {
+  for (let index = 0; index < checks && successes < requiredSuccesses; index += 1) {
     const draw = drawCards(next, 1);
     const card = draw.cards[0];
     next = card ? { ...draw.state, discard: [...draw.state.discard, card] } : draw.state;
@@ -158,8 +158,9 @@ const playCard = (state: GameState, command: Extract<GameCommand, { type: 'PLAY_
     let next = removePlayedCard(state, player, card);
     const updated = playerById(next, player.id)!;
     next = replacePlayer(next, { ...updated, bangsPlayedThisTurn: updated.bangsPlayedThisTurn + 1 });
-    const check = barrelCheck(next, target);
-    const required = (player.character.name === 'Slab the Killer' ? 2 : 1) - check.successes;
+    const requiredSuccesses = player.character.name === 'Slab the Killer' ? 2 : 1;
+    const check = barrelCheck(next, target, requiredSuccesses);
+    const required = requiredSuccesses - check.successes;
     next = required <= 0 ? check.state : createReaction(check.state, 'BANG', player.id, target.id, required, command.createdAt);
     return { ok: true, state: log(next, `${player.name} juega BANG! contra ${target.name}.`, 'ACTION') };
   }
