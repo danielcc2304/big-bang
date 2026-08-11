@@ -30,6 +30,7 @@ vi.mock('./identity', () => ({
   createReconnectToken: vi.fn(() => 'reconnect-token'),
   hashReconnectToken: vi.fn(() => Promise.resolve('a'.repeat(64))),
   saveReconnectToken: vi.fn(),
+  loadReconnectToken: vi.fn(() => 'stored-token'),
 }));
 
 import { joinRoom } from './roomService';
@@ -99,5 +100,21 @@ describe('joinRoom', () => {
       'seatProofs/ABC123/1',
       'a'.repeat(64),
     );
+  });
+
+  it('no permite que el mismo usuario anónimo consuma un segundo asiento', async () => {
+    databaseMocks.get.mockResolvedValue({
+      val: () => ({
+        code: 'ABC123', status: 'LOBBY', createdAt: 1, hostUid: 'host-user', maxPlayers: 4, characterMode: 'OFFICIAL',
+        seats: { 0: { number: 0, playerId: 'player-tablet-use', ownerUid: 'tablet-user-1234567890', reconnectHash: null, isBot: false, joinedAt: 1 } },
+        players: { 'player-tablet-use': { uid: 'tablet-user-1234567890', playerId: 'player-tablet-use', displayName: 'Tablet', connected: false, lastSeen: 1 } },
+        coordinator: { coordinatorId: 'host-user', coordinatorEpoch: 1, leaseUntil: Date.now() + 10_000, heartbeat: Date.now() }, canonical: null, commands: {},
+      }),
+    });
+
+    const identity = await joinRoom('abc123', 'Tablet');
+
+    expect(identity.playerId).toBe('player-tablet-use');
+    expect(databaseMocks.runTransaction).not.toHaveBeenCalled();
   });
 });

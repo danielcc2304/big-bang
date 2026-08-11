@@ -4,6 +4,7 @@ import { characterByName } from '../characters/characters';
 import { distanceBetween, isInRange } from '../rules/distance';
 import { seededRandom } from '../../utils/random';
 import { assertGameState } from './invariants';
+import { isGameCommand } from './commands';
 import {
   damagePlayer, discardFromHand, drawCards, healPlayer, nextLivingPlayerId, playerById, replacePlayer,
 } from './helpers';
@@ -336,6 +337,7 @@ const handleCommand = (state: GameState, command: GameCommand): CommandResult =>
 };
 
 export const applyCommand = (state: GameState, command: GameCommand): CommandResult => {
+  if (!isGameCommand(command)) return fail(state, 'INVALID_COMMAND', 'El comando recibido no tiene un formato válido.');
   if (state.processedCommandIds.includes(command.commandId)) return { ok: true, state };
   if (command.expectedRevision !== state.revision) return fail(state, 'STALE_REVISION', `La partida avanzó de la revisión ${command.expectedRevision} a la ${state.revision}.`);
   if (state.winner) return fail(state, 'GAME_OVER', 'La partida ya ha terminado.');

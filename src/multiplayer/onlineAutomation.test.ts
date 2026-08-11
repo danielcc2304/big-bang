@@ -29,4 +29,10 @@ describe('automatización de jugadores desconectados', () => {
     const room: Room = { ...initial, canonical: { ...initial.canonical!, turn: { ...initial.canonical!.turn, currentPlayerId: 'p0', phase: 'PLAY' } } };
     expect(automatedActorId(room, 99_999)).toBeNull();
   });
+
+  it('respeta una conexión viva aunque el campo legacy connected esté desactualizado', () => {
+    const initial = roomWithHuman(false, 1);
+    const room: Room = { ...initial, presence: { p0: { tab: { uid: 'guest', connected: true, connectedAt: 1, lastSeen: 99_999 } } }, canonical: { ...initial.canonical!, turn: { ...initial.canonical!.turn, currentPlayerId: 'p0', phase: 'PLAY' } } };
+    expect(automatedActorId(room, 99_999)).toBeNull();
+  });
 });

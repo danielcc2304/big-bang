@@ -17,6 +17,8 @@ export const collectCards = (state: GameState): readonly Card[] => [
 
 export const validateGameState = (state: GameState): readonly string[] => {
   const errors: string[] = [];
+  const playerIds = state.players.map((player) => player.id);
+  if (new Set(playerIds).size !== playerIds.length) errors.push('Hay jugadores duplicados en el estado canónico.');
   const ids = collectCards(state).map((card) => card.id);
   if (new Set(ids).size !== ids.length) {
     const duplicates = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];

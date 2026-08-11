@@ -26,6 +26,24 @@ export interface CoordinatorLease {
   readonly heartbeat: number;
 }
 
+export interface PresenceConnection {
+  readonly uid: string;
+  readonly connected: boolean;
+  readonly connectedAt: number;
+  readonly lastSeen: number;
+}
+
+export type CommandReceiptStatus = 'APPLIED' | 'REJECTED';
+
+export interface CommandReceipt {
+  readonly commandId: string;
+  readonly submittedByUid: string;
+  readonly status: CommandReceiptStatus;
+  readonly updatedAt: number;
+  readonly revision?: number;
+  readonly error?: string;
+}
+
 export interface Room {
   readonly code: string;
   readonly status: 'LOBBY' | 'PLAYING' | 'ENDED';
@@ -38,6 +56,8 @@ export interface Room {
   readonly coordinator: CoordinatorLease;
   readonly canonical: GameState | null;
   readonly commands: Readonly<Record<string, CommandEnvelope>>;
+  readonly commandReceipts?: Readonly<Record<string, CommandReceipt>>;
+  readonly presence?: Readonly<Record<string, Readonly<Record<string, PresenceConnection>>>>;
 }
 
 export interface CommandEnvelope {

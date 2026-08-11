@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CharacterMode, GameCommand, Room } from './types';
 import { useLocalGame } from './hooks/useLocalGame';
 import { useOnlineRoom } from './hooks/useOnlineRoom';
@@ -25,16 +25,29 @@ const OnlineLobby = ({ room, identity, error, onStart, onExit }: { readonly room
 };
 
 const OnlineSession = ({ identity, onExit }: { readonly identity: RoomIdentity; readonly onExit: () => void }) => {
-  const { room, connection } = useOnlineRoom(identity.code);
+  const { room, connection, retry } = useOnlineRoom(identity.code, identity.playerId, identity.uid, identity.presenceConnectionId);
   const [error, setError] = useState<string | null>(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const lastReceiptId = useRef<string | null>(null);
   useOnlineDriver(identity.code, room, identity.uid);
   const visibleError = error ?? connection.errors.at(-1) ?? null;
+  useEffect(() => {
+    const receipt = Object.values(room?.commandReceipts ?? {})
+      .filter((candidate) => candidate.submittedByUid === identity.uid)
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    if (!receipt || receipt.commandId === lastReceiptId.current) return;
+    lastReceiptId.current = receipt.commandId;
+    setError(receipt.status === 'REJECTED' ? receipt.error ?? 'La acción fue rechazada por la sala.' : null);
+  }, [identity.uid, room?.commandReceipts]);
   const dispatch = useCallback((next: GameCommand): boolean => {
+    if (!connection.connected) {
+      setError('Sin conexión con la sala. Espera a que vuelva la conexión antes de enviar la acción.');
+      return false;
+    }
     void enqueueCommand(identity.code, next, identity.uid).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'No se pudo enviar la acción.'));
     return true;
-  }, [identity.code, identity.uid]);
-  if (!room) return <main className="loading-screen"><div className="brand-mark">BANG!</div><p>{connection.lastUpdateAt ? 'La sala ya no está disponible.' : 'Abriendo las puertas del saloon…'}</p>{connection.lastUpdateAt && <button className="primary-action" onClick={onExit}>Volver</button>}</main>;
+  }, [connection.connected, identity.code, identity.uid]);
+  if (!room) return <main className="loading-screen"><div className="brand-mark">BANG!</div><p>{visibleError ?? (connection.lastUpdateAt ? 'La sala ya no está disponible.' : 'Abriendo las puertas del saloon…')}</p>{connection.lastUpdateAt ? <div className="modal-actions"><button className="primary-action" onClick={retry}>Reintentar</button><button onClick={onExit}>Volver</button></div> : null}</main>;
   if (room.status === 'LOBBY') return <OnlineLobby room={room} identity={identity} error={visibleError} onExit={onExit} onStart={() => void startOnlineGame(room.code, identity.uid).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'No se pudo empezar.'))} />;
   if (room.status === 'ENDED' || !room.canonical) return <main className="loading-screen"><div className="brand-mark">PARTIDA FINALIZADA</div><button className="primary-action" onClick={onExit}>Volver</button></main>;
   if (!room.canonical.players.some((player) => player.id === identity.playerId)) return <main className="loading-screen"><div className="brand-mark">ASIENTO NO DISPONIBLE</div><p>Tu identidad ya no pertenece a esta partida. Vuelve a entrar con la clave de recuperación.</p><button className="primary-action" onClick={onExit}>Volver</button></main>;
