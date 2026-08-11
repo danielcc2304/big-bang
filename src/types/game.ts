@@ -30,6 +30,11 @@ export interface Character {
   readonly ability: string;
 }
 
+export interface CharacterDraftState {
+  readonly optionsByPlayer: Readonly<Record<string, readonly [CharacterName, CharacterName]>>;
+  readonly chosenByPlayer: Readonly<Record<string, CharacterName>>;
+}
+
 export interface Equipment {
   readonly weapon: Card | null;
   readonly barrel: Card | null;
@@ -100,6 +105,13 @@ export interface GameLogEntry {
   readonly revision: number;
   readonly message: string;
   readonly tone: 'NORMAL' | 'ACTION' | 'DANGER' | 'SYSTEM';
+  readonly effect?: {
+    readonly kind: 'JUDGEMENT' | 'REACTION';
+    readonly playerId: string;
+    readonly card: Card;
+    readonly success: boolean;
+    readonly headline: string;
+  };
 }
 
 export type Winner = 'LAW' | 'OUTLAWS' | 'RENEGADE';
@@ -115,6 +127,7 @@ export interface GameState {
   readonly reaction: Reaction | null;
   readonly storeState: StoreState | null;
   readonly multiAction: MultiActionState | null;
+  readonly characterDraft: CharacterDraftState | null;
   readonly processedCommandIds: readonly string[];
   readonly logs: readonly GameLogEntry[];
   readonly winner: Winner | null;
@@ -128,12 +141,12 @@ interface CommandBase {
 }
 
 export type GameCommand =
-  | (CommandBase & { readonly type: 'PLAY_CARD'; readonly payload: { readonly cardId: string; readonly targetPlayerId?: string; readonly targetCardId?: string } })
-  | (CommandBase & { readonly type: 'DRAW_CARDS'; readonly payload: { readonly count?: number } })
+  | (CommandBase & { readonly type: 'PLAY_CARD'; readonly payload: { readonly cardId: string; readonly targetPlayerId?: string; readonly targetCardId?: string; readonly targetCardChoice?: 'RANDOM_HAND' } })
+  | (CommandBase & { readonly type: 'DRAW_CARDS'; readonly payload: { readonly firstCardSource?: 'DECK' | 'DISCARD' } })
   | (CommandBase & { readonly type: 'SELECT_TARGET'; readonly payload: { readonly targetPlayerId: string } })
   | (CommandBase & { readonly type: 'END_TURN'; readonly payload: Record<string, never> })
   | (CommandBase & { readonly type: 'DISCARD_CARDS'; readonly payload: { readonly cardIds: readonly string[] } })
-  | (CommandBase & { readonly type: 'REACTION'; readonly payload: { readonly cardIds: readonly string[] } })
+  | (CommandBase & { readonly type: 'REACTION'; readonly payload: { readonly cardIds?: readonly string[]; readonly takeDamage?: true } })
   | (CommandBase & { readonly type: 'STORE_PICK'; readonly payload: { readonly cardId: string } })
   | (CommandBase & { readonly type: 'CHARACTER_CHOICE'; readonly payload: { readonly characterName: CharacterName } })
   | (CommandBase & { readonly type: 'USE_CHARACTER_ABILITY'; readonly payload: { readonly cardIds?: readonly string[]; readonly targetPlayerId?: string } })

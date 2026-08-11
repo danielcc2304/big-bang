@@ -28,10 +28,30 @@ export const ensureAnonymousUser = async (): Promise<User> => {
   const services = firebaseServices();
   if (!services) throw new Error('Firebase no está configurado. Revisa las variables VITE_FIREBASE_*');
   if (services.auth.currentUser) return services.auth.currentUser;
-  await signInAnonymously(services.auth);
+  await Promise.race([
+    signInAnonymously(services.auth),
+    new Promise<never>((_, reject) => globalThis.setTimeout(() => reject(new Error('Firebase tardó demasiado en autenticar el dispositivo.')), 15_000)),
+  ]);
   return await new Promise<User>((resolve, reject) => {
+    let settled = false;
+    const timeout = globalThis.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      unsubscribe();
+      reject(new Error('No se pudo confirmar la identidad anónima.'));
+    }, 15_000);
     const unsubscribe = onAuthStateChanged(services.auth, (user) => {
-      if (user) { unsubscribe(); resolve(user); }
-    }, reject);
+      if (!user || settled) return;
+      settled = true;
+      globalThis.clearTimeout(timeout);
+      unsubscribe();
+      resolve(user);
+    }, (error) => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timeout);
+      unsubscribe();
+      reject(error);
+    });
   });
 };

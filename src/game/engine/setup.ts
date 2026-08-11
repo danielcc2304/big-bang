@@ -1,4 +1,4 @@
-import type { Character, Equipment, GameState, Player } from '../../types';
+import type { Character, CharacterMode, Equipment, GameState, Player } from '../../types';
 import { CHARACTERS } from '../characters/characters';
 import { createDeck } from '../cards/deck';
 import { dealRoles } from '../rules/roles';
@@ -12,7 +12,7 @@ export interface PlayerSetup {
 
 const emptyEquipment = (): Equipment => ({ weapon: null, barrel: null, mustang: null, scope: null, jail: null, dynamite: null });
 
-export const createGame = (setups: readonly PlayerSetup[], seed = Date.now()): GameState => {
+export const createGame = (setups: readonly PlayerSetup[], seed = Date.now(), characterMode: CharacterMode = 'OFFICIAL'): GameState => {
   if (setups.length < 4 || setups.length > 7) throw new Error('Se necesitan entre 4 y 7 jugadores.');
   const random = seededRandom(seed);
   const roles = dealRoles(setups.length, random);
@@ -21,10 +21,10 @@ export const createGame = (setups: readonly PlayerSetup[], seed = Date.now()): G
   const players: Player[] = setups.map((setup, seat) => {
     const role = roles[seat]!;
     const character: Character = characters[seat]!;
-    const marker = characters[seat + setups.length] ?? null;
+    const marker = characterMode === 'OFFICIAL' ? characters[seat + setups.length] ?? null : null;
     const maxLives = character.lives + (role === 'SHERIFF' ? 1 : 0);
-    const hand = deck.slice(0, maxLives);
-    deck = deck.slice(maxLives);
+    const hand = characterMode === 'OFFICIAL' ? deck.slice(0, maxLives) : [];
+    if (characterMode === 'OFFICIAL') deck = deck.slice(maxLives);
     return {
       ...setup,
       seat,
@@ -40,6 +40,11 @@ export const createGame = (setups: readonly PlayerSetup[], seed = Date.now()): G
     };
   });
   const sheriff = players.find((player) => player.role === 'SHERIFF')!;
+  const optionsByPlayer = Object.fromEntries(players.map((player) => {
+    const first = characters[player.seat * 2]!;
+    const second = characters[player.seat * 2 + 1]!;
+    return [player.id, [first.name, second.name] as const];
+  })) as Record<string, readonly [Character['name'], Character['name']]>;
   return {
     gameId: `game-${seed}`,
     seed,
@@ -47,10 +52,11 @@ export const createGame = (setups: readonly PlayerSetup[], seed = Date.now()): G
     players,
     deck,
     discard: [],
-    turn: { number: 1, currentPlayerId: sheriff.id, phase: 'TURN_START', pendingDiscardCount: 0 },
+    turn: { number: 1, currentPlayerId: characterMode === 'DRAFT_TWO' ? players[0]!.id : sheriff.id, phase: characterMode === 'DRAFT_TWO' ? 'CHARACTER_CHOICE' : 'TURN_START', pendingDiscardCount: 0 },
     reaction: null,
     storeState: null,
     multiAction: null,
+    characterDraft: characterMode === 'DRAFT_TWO' ? { optionsByPlayer, chosenByPlayer: {} } : null,
     processedCommandIds: [],
     logs: [{ id: 'start', revision: 0, message: `${sheriff.name} es el Sheriff.`, tone: 'SYSTEM' }],
     winner: null,

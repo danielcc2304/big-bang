@@ -1,42 +1,128 @@
 export type SoundName = 'bang' | 'missed' | 'damage' | 'beer' | 'dynamite' | 'jail' | 'store' | 'select' | 'draw' | 'equip' | 'turn' | 'death' | 'victory' | 'defeat' | 'connect' | 'error';
 
-class SoundService {
-  private context: AudioContext | null = null;
-  private gain: GainNode | null = null;
-  enabled = localStorage.getItem('bang:sound') !== 'off';
-  volume = 0.45;
+const EFFECTS: Record<SoundName, readonly [number, number, OscillatorType]> = {
+  bang: [95, .18, 'sawtooth'], missed: [980, .1, 'sine'], damage: [145, .2, 'sawtooth'], beer: [520, .14, 'sine'],
+  dynamite: [65, .55, 'sawtooth'], jail: [260, .18, 'square'], store: [720, .18, 'triangle'], select: [430, .06, 'triangle'],
+  draw: [760, .1, 'triangle'], equip: [220, .1, 'square'], turn: [660, .16, 'triangle'], death: [110, .5, 'sawtooth'],
+  victory: [880, .45, 'triangle'], defeat: [190, .5, 'sawtooth'], connect: [560, .15, 'sine'], error: [125, .16, 'square'],
+};
 
-  async unlock(): Promise<void> {
-    if (!this.enabled) return;
-    this.context ??= new AudioContext();
-    if (!this.gain) { this.gain = this.context.createGain(); this.gain.connect(this.context.destination); }
-    this.gain.gain.value = this.volume;
+// Original, restrained saloon loop. It stays synthesized so the project ships no licensed recording.
+const WESTERN_MELODY = [330, 392, 440, 392, 330, 294, 262, 294, 330, 392, 440, 494, 440, 392, 330, 294] as const;
+const WESTERN_BASS = [82, 98, 110, 98] as const;
+type AudioContextConstructor = new () => AudioContext;
+
+const audioContextConstructor = (): AudioContextConstructor | undefined => {
+  if (typeof globalThis.AudioContext === 'function') return globalThis.AudioContext;
+  return (globalThis as typeof globalThis & { webkitAudioContext?: AudioContextConstructor }).webkitAudioContext;
+};
+
+export class SoundService {
+  private context: AudioContext | null = null;
+  private effectsGain: GainNode | null = null;
+  private musicGain: GainNode | null = null;
+  private musicTimer: number | null = null;
+  private musicStart: Promise<void> | null = null;
+  private musicGeneration = 0;
+  private lastEffectAt = new Map<SoundName, number>();
+  enabled = localStorage.getItem('bang:sound') !== 'off';
+  musicEnabled = localStorage.getItem('bang:music') !== 'off';
+  volume = 0.72;
+
+  get musicPlaying(): boolean { return this.musicTimer !== null; }
+
+  async unlock(): Promise<boolean> {
+    if (!this.enabled) return false;
+    if (!this.context) {
+      const AudioContextClass = audioContextConstructor();
+      if (!AudioContextClass) return false;
+      this.context = new AudioContextClass();
+    }
+    if (!this.effectsGain) {
+      this.effectsGain = this.context.createGain();
+      this.effectsGain.connect(this.context.destination);
+    }
+    if (!this.musicGain) {
+      this.musicGain = this.context.createGain();
+      this.musicGain.connect(this.context.destination);
+    }
+    this.effectsGain.gain.value = this.volume;
+    this.musicGain.gain.value = this.musicTimer !== null || this.musicStart !== null ? this.volume * .62 : 0;
     if (this.context.state === 'suspended') await this.context.resume();
+    return this.context.state === 'running';
   }
 
-  setEnabled(enabled: boolean): void { this.enabled = enabled; localStorage.setItem('bang:sound', enabled ? 'on' : 'off'); }
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    localStorage.setItem('bang:sound', enabled ? 'on' : 'off');
+    if (!enabled) this.stopMusic();
+  }
+
+  setMusicEnabled(enabled: boolean): void {
+    this.musicEnabled = enabled;
+    localStorage.setItem('bang:music', enabled ? 'on' : 'off');
+    if (enabled) void this.startMusic(); else this.stopMusic();
+  }
 
   play(name: SoundName): void {
     if (!this.enabled) return;
-    void this.unlock().then(() => {
-      if (!this.context || !this.gain) return;
-      const notes: Record<SoundName, readonly [number, number, OscillatorType]> = {
-        bang: [95, .18, 'sawtooth'], missed: [980, .1, 'sine'], damage: [145, .2, 'sawtooth'], beer: [520, .14, 'sine'],
-        dynamite: [65, .55, 'sawtooth'], jail: [260, .18, 'square'], store: [720, .18, 'triangle'], select: [430, .06, 'triangle'],
-        draw: [760, .1, 'triangle'], equip: [220, .1, 'square'], turn: [660, .16, 'triangle'], death: [110, .5, 'sawtooth'],
-        victory: [880, .45, 'triangle'], defeat: [190, .5, 'sawtooth'], connect: [560, .15, 'sine'], error: [125, .16, 'square'],
-      };
-      const [frequency, duration, type] = notes[name];
-      const oscillator = this.context.createOscillator();
-      const envelope = this.context.createGain();
-      oscillator.type = type;
-      oscillator.frequency.setValueAtTime(frequency, this.context.currentTime);
-      envelope.gain.setValueAtTime(.001, this.context.currentTime);
-      envelope.gain.exponentialRampToValueAtTime(.14, this.context.currentTime + .01);
-      envelope.gain.exponentialRampToValueAtTime(.001, this.context.currentTime + duration);
-      oscillator.connect(envelope).connect(this.gain);
-      oscillator.start(); oscillator.stop(this.context.currentTime + duration + .02);
-    });
+    const now = performance.now();
+    if (now - (this.lastEffectAt.get(name) ?? -Infinity) < 70) return;
+    this.lastEffectAt.set(name, now);
+    void this.unlock().then((ready) => {
+      if (!ready || !this.context || !this.effectsGain) return;
+      const [frequency, duration, type] = EFFECTS[name];
+      this.scheduleTone(frequency, this.context.currentTime, duration, type, .14, this.effectsGain);
+    }).catch(() => undefined);
+  }
+
+  async startMusic(): Promise<void> {
+    if (!this.enabled || !this.musicEnabled || this.musicTimer !== null) return;
+    if (this.musicStart) return this.musicStart;
+    const generation = ++this.musicGeneration;
+    this.musicStart = this.beginMusic(generation).finally(() => { this.musicStart = null; });
+    return this.musicStart;
+  }
+
+  private async beginMusic(generation: number): Promise<void> {
+    if (!await this.unlock() || !this.context || !this.musicGain || generation !== this.musicGeneration || !this.enabled || !this.musicEnabled) return;
+    this.musicGain.gain.value = this.volume * .62;
+    const scheduleBar = (): void => {
+      if (!this.context || !this.musicGain || generation !== this.musicGeneration) return;
+      const context = this.context;
+      const musicGain = this.musicGain;
+      const eighth = 60 / 104 / 2;
+      const start = context.currentTime + .04;
+      WESTERN_MELODY.forEach((frequency, index) => {
+        this.scheduleTone(frequency, start + index * eighth, eighth * .55, 'triangle', .11, musicGain);
+      });
+      WESTERN_BASS.forEach((frequency, index) => {
+        this.scheduleTone(frequency, start + index * eighth * 4, eighth * 2.1, 'sine', .15, musicGain);
+      });
+    };
+    scheduleBar();
+    this.musicTimer = window.setInterval(scheduleBar, 60 / 104 / 2 * 16 * 1_000);
+  }
+
+  stopMusic(): void {
+    this.musicGeneration += 1;
+    if (this.musicTimer !== null) window.clearInterval(this.musicTimer);
+    this.musicTimer = null;
+    if (this.musicGain) this.musicGain.gain.value = 0;
+  }
+
+  private scheduleTone(frequency: number, start: number, duration: number, type: OscillatorType, peak: number, destination: AudioNode): void {
+    if (!this.context) return;
+    const oscillator = this.context.createOscillator();
+    const envelope = this.context.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, start);
+    envelope.gain.setValueAtTime(.001, start);
+    envelope.gain.exponentialRampToValueAtTime(peak, start + .015);
+    envelope.gain.exponentialRampToValueAtTime(.001, start + duration);
+    oscillator.connect(envelope).connect(destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration + .03);
   }
 }
 

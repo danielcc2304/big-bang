@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createGame } from '../game/engine';
+import { applyCommand, command, createGame } from '../game/engine';
+import { decideAiCommand, initialKnowledge } from '../game/ai';
+import { makeCard, patchPlayer, playPhase, run, testState } from '../test/helpers';
 import type { GameState, Room } from '../types';
 import { hydrateGameState, hydrateRoom } from './hydrate';
 
@@ -10,6 +12,19 @@ const setups = Array.from({ length: 4 }, (_, index) => ({
 }));
 
 describe('Firebase state hydration', () => {
+  it('conserva los efectos públicos de desenfunde al viajar por Firebase', () => {
+    const game = createGame(setups, 41);
+    const card = game.deck[0]!;
+    const withEffect = {
+      ...game,
+      logs: [...game.logs, { id: 'judgement-online', revision: 1, message: 'El Barril salva al jugador.', tone: 'ACTION' as const, effect: { kind: 'JUDGEMENT' as const, playerId: 'human', card, success: true, headline: '¡SE SALVA!' } }],
+    };
+
+    const hydrated = hydrateGameState(JSON.parse(JSON.stringify(withEffect)) as GameState);
+
+    expect(hydrated.logs.at(-1)?.effect).toEqual(withEffect.logs.at(-1)?.effect);
+  });
+
   it('restores values omitted by Realtime Database from a fresh game', () => {
     const game = createGame(setups, 42);
     const firebaseState = {
@@ -42,7 +57,7 @@ describe('Firebase state hydration', () => {
     });
   });
 
-  it('restores room collections and nullable seat fields', () => {
+  it('normalizes numeric Firebase seat arrays and restores omitted room collections', () => {
     const game = createGame(setups, 42);
     const firebaseRoom = {
       code: 'ABC123',
@@ -51,7 +66,8 @@ describe('Firebase state hydration', () => {
       hostUid: 'uid-1',
       maxPlayers: 4,
       characterMode: 'OFFICIAL',
-      seats: { 0: { number: 0, playerId: 'human', ownerUid: 'uid-1', isBot: false, joinedAt: 1 } },
+      // Firebase returns dense integer-keyed objects as arrays from snapshot.val().
+      seats: [{ number: 0, playerId: 'human', ownerUid: 'uid-1', isBot: false, joinedAt: 1 }],
       players: {},
       coordinator: { coordinatorId: 'uid-1', coordinatorEpoch: 1, leaseUntil: 10, heartbeat: 1 },
       canonical: game,
@@ -60,7 +76,26 @@ describe('Firebase state hydration', () => {
     const hydrated = hydrateRoom(firebaseRoom);
 
     expect(hydrated.commands).toEqual({});
+    expect(Array.isArray(hydrated.seats)).toBe(false);
     expect(hydrated.seats[0]?.reconnectHash).toBeNull();
     expect(hydrated.canonical?.discard).toEqual([]);
+  });
+
+  it('restores the empty Almacén picks removed by Firebase so online AI can continue', () => {
+    let game = playPhase(testState());
+    const store = makeCard('GENERAL_STORE', 'online-store');
+    game = patchPlayer(game, 'p0', { kind: 'AI', hand: [store] });
+    game = run(game, command(game, 'p0', 'PLAY_CARD', { cardId: store.id }));
+    const firebaseState = {
+      ...game,
+      storeState: { ...game.storeState!, pickedBy: undefined },
+    } as unknown as GameState;
+
+    const hydrated = hydrateGameState(firebaseState);
+    const aiCommand = decideAiCommand(hydrated, 'p0', initialKnowledge(hydrated, 'p0'));
+
+    expect(hydrated.storeState?.pickedBy).toEqual({});
+    expect(aiCommand?.type).toBe('STORE_PICK');
+    expect(applyCommand(hydrated, aiCommand!).ok).toBe(true);
   });
 });
