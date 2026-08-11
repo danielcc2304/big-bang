@@ -39,6 +39,7 @@ const soundForLog = (message: string): Parameters<typeof sound.play>[0] => {
 export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel = 'LOCAL' }: GameBoardProps) => {
   const viewer = state.players.find((player) => player.id === viewerId)!;
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [pendingCardTargetId, setPendingCardTargetId] = useState<string | null>(null);
   const [inspected, setInspected] = useState<Player | null>(null);
   const [reactionCards, setReactionCards] = useState<readonly string[]>([]);
   const [keepCards, setKeepCards] = useState<readonly string[]>([]);
@@ -48,6 +49,8 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   const previousTurnPlayerId = useRef(state.turn.currentPlayerId);
   const previousWinner = useRef(state.winner);
   const selectedCard = viewer.hand.find((card) => card.id === selectedCardId);
+  const pendingCardTarget = state.players.find((player) => player.id === pendingCardTargetId);
+  const pendingPublicCards = pendingCardTarget ? Object.values(pendingCardTarget.equipment).filter((card): card is Card => card !== null) : [];
   const topDiscard = state.discard.at(-1);
   const topDiscardDefinition = topDiscard ? CARD_CATALOG[topDiscard.name] : null;
   const isHumanTurn = state.turn.currentPlayerId === viewerId && viewer.alive;
@@ -84,6 +87,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
 
   const playCard = (card: Card): void => {
     if (!canPlay) return;
+    setPendingCardTargetId(null);
     if (TARGET_CARDS.has(card.name) || card.name === 'MISSED' && viewer.character.name === 'Calamity Janet') setSelectedCardId(card.id);
     else {
       dispatch(command(state, viewerId, 'PLAY_CARD', { cardId: card.id }));
@@ -94,11 +98,23 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
 
   const targetPlayer = (target: Player): void => {
     if (!selectedCard) return;
-    const publicCard = Object.values(target.equipment).find((card): card is Card => card !== null);
-    const payload = { cardId: selectedCard.id, targetPlayerId: target.id, ...(publicCard && (selectedCard.name === 'PANIC' || selectedCard.name === 'CAT_BALOU') ? { targetCardId: publicCard.id } : {}) };
+    if (selectedCard.name === 'PANIC' || selectedCard.name === 'CAT_BALOU') {
+      setPendingCardTargetId(target.id);
+      return;
+    }
+    const payload = { cardId: selectedCard.id, targetPlayerId: target.id };
     if (dispatch(command(state, viewerId, 'PLAY_CARD', payload))) {
       sound.play(selectedCard.name === 'BANG' ? 'bang' : 'select');
       setSelectedCardId(null);
+    }
+  };
+
+  const takeTargetCard = (targetCardId?: string, targetCardChoice?: 'RANDOM_HAND'): void => {
+    if (!selectedCard || !pendingCardTarget) return;
+    if (dispatch(command(state, viewerId, 'PLAY_CARD', { cardId: selectedCard.id, targetPlayerId: pendingCardTarget.id, ...(targetCardId ? { targetCardId } : {}), ...(targetCardChoice ? { targetCardChoice } : {}) }))) {
+      sound.play('select');
+      setSelectedCardId(null);
+      setPendingCardTargetId(null);
     }
   };
 
@@ -108,7 +124,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
     sound.play(cardIds.length > 0 ? 'missed' : 'damage');
   };
 
-  const endTurn = (): void => { dispatch(command(state, viewerId, 'END_TURN', {})); setSelectedCardId(null); };
+  const endTurn = (): void => { dispatch(command(state, viewerId, 'END_TURN', {})); setSelectedCardId(null); setPendingCardTargetId(null); };
   const toggleKeep = (cardId: string): void => setKeepCards((current) => current.includes(cardId) ? current.filter((id) => id !== cardId) : current.length < viewer.lives ? [...current, cardId] : current);
   const confirmKeep = (): void => {
     const discards = viewer.hand.filter((card) => !keepCards.includes(card.id)).map((card) => card.id);
@@ -171,6 +187,10 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
 
       {canChoosePedroDraw && topDiscard && topDiscardDefinition && (
         <div className="modal-backdrop"><section className="game-modal" role="dialog" aria-modal="true"><span className="eyebrow">HABILIDAD · PEDRO RAMÍREZ</span><h2>¿De dónde robas la primera?</h2><p>La carta superior del descarte es <b>{topDiscardDefinition.label}</b>. La segunda carta siempre vendrá del mazo.</p><div className="modal-actions"><button onClick={() => dispatch(command(state, viewerId, 'DRAW_CARDS', { firstCardSource: 'DECK' }))}>Robar 2 del mazo</button><button className="primary-action" onClick={() => dispatch(command(state, viewerId, 'DRAW_CARDS', { firstCardSource: 'DISCARD' }))}>Tomar {topDiscardDefinition.label}</button></div></section></div>
+      )}
+
+      {pendingCardTarget && selectedCard && (selectedCard.name === 'PANIC' || selectedCard.name === 'CAT_BALOU') && (
+        <div className="modal-backdrop"><section className="game-modal wide" role="dialog" aria-modal="true" aria-labelledby="target-card-title"><span className="eyebrow">{CARD_CATALOG[selectedCard.name].label.toUpperCase()}</span><h2 id="target-card-title">{selectedCard.name === 'CAT_BALOU' ? 'Elige qué carta eliminar' : 'Elige qué carta robar'}</h2><p>Puedes elegir una carta pública de <b>{pendingCardTarget.name}</b> o probar suerte con una carta aleatoria de su mano.</p>{pendingCardTarget.hand.length > 0 && <div className="modal-actions"><button className="primary-action" onClick={() => takeTargetCard(undefined, 'RANDOM_HAND')}>Carta aleatoria de la mano ({pendingCardTarget.hand.length})</button></div>}<div className="card-rail modal-rail">{pendingPublicCards.map((card) => <CardView key={card.id} card={card} onClick={() => takeTargetCard(card.id)} />)}</div>{pendingCardTarget.hand.length === 0 && pendingPublicCards.length === 0 && <p>Ese rival no tiene cartas que puedas elegir.</p>}<div className="modal-actions"><button onClick={() => setPendingCardTargetId(null)}>Cancelar</button></div></section></div>
       )}
 
       {state.reaction?.targetPlayerId === viewerId && (

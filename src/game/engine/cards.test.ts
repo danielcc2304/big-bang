@@ -28,6 +28,32 @@ describe('cartas de acción y equipo', () => {
     expect(state.players[2]!.equipment.weapon).toBeNull();
   });
 
+  it('Cat Balou permite elegir una carta pública concreta entre varias', () => {
+    let state = playPhase(testState()); const cat = makeCard('CAT_BALOU', 'cat-choice'); const volcanic = makeCard('VOLCANIC', 'volcanic-choice'); const barrel = makeCard('BARREL', 'barrel-choice');
+    state = patchPlayer(state, 'p0', { hand: [cat] }); state = patchPlayer(state, 'p2', { equipment: { ...state.players[2]!.equipment, weapon: volcanic, barrel } });
+    state = run(state, command(state, 'p0', 'PLAY_CARD', { cardId: cat.id, targetPlayerId: 'p2', targetCardId: barrel.id }));
+    expect(state.players[2]!.equipment.weapon?.id).toBe(volcanic.id);
+    expect(state.players[2]!.equipment.barrel).toBeNull();
+    expect(state.discard.at(-1)?.id).toBe(barrel.id);
+  });
+
+  it('Cat Balou no permite indicar el id de una carta oculta', () => {
+    let state = playPhase(testState()); const cat = makeCard('CAT_BALOU', 'cat-hidden'); const hidden = makeCard('MUSTANG', 'hidden-choice');
+    state = patchPlayer(state, 'p0', { hand: [cat] }); state = patchPlayer(state, 'p2', { hand: [hidden] });
+    const result = applyCommand(state, command(state, 'p0', 'PLAY_CARD', { cardId: cat.id, targetPlayerId: 'p2', targetCardId: hidden.id }));
+    expect(result.ok).toBe(false);
+    expect(result.state).toBe(state);
+    expect(state.players[0]!.hand).toContain(cat);
+  });
+
+  it('Cat Balou permite escoger una carta aleatoria de la mano', () => {
+    let state = playPhase(testState()); const cat = makeCard('CAT_BALOU', 'cat-random'); const hiddenA = makeCard('MUSTANG', 'hidden-a'); const hiddenB = makeCard('BARREL', 'hidden-b');
+    state = patchPlayer(state, 'p0', { hand: [cat] }); state = patchPlayer(state, 'p2', { hand: [hiddenA, hiddenB] });
+    state = run(state, command(state, 'p0', 'PLAY_CARD', { cardId: cat.id, targetPlayerId: 'p2', targetCardChoice: 'RANDOM_HAND' }));
+    expect(state.players[2]!.hand).toHaveLength(1);
+    expect(state.discard).toHaveLength(2);
+  });
+
   it('Prisión no puede jugarse sobre el Sheriff', () => {
     let state = playPhase(testState()); const jail = makeCard('JAIL', 'jail');
     state = patchPlayer(state, 'p0', { hand: [jail] }); state = patchPlayer(state, 'p1', { role: 'SHERIFF' });

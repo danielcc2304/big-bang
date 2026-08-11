@@ -2,6 +2,7 @@ import type { Card, CardName, CommandFailure, CommandResult, GameCommand, GameSt
 import { CARD_CATALOG } from '../cards/catalog';
 import { characterByName } from '../characters/characters';
 import { distanceBetween, isInRange } from '../rules/distance';
+import { seededRandom } from '../../utils/random';
 import { assertGameState } from './invariants';
 import {
   damagePlayer, discardFromHand, drawCards, healPlayer, nextLivingPlayerId, playerById, replacePlayer,
@@ -128,10 +129,12 @@ const resolveTurnStart = (state: GameState, player: Player): GameState => {
   return { ...next, turn: { ...next.turn, phase: 'DRAW' } };
 };
 
-const takeTargetCard = (state: GameState, source: Player, target: Player, cardId: string | undefined, discard: boolean): CommandResult => {
+const takeTargetCard = (state: GameState, source: Player, target: Player, cardId: string | undefined, randomHand: boolean, discard: boolean): CommandResult => {
   const equipmentEntries = Object.entries(target.equipment) as [keyof Player['equipment'], Card | null][];
   const equipmentMatch = cardId ? equipmentEntries.find(([, card]) => card?.id === cardId) : undefined;
-  const handMatch = cardId ? target.hand.find((card) => card.id === cardId) : target.hand[0];
+  if (cardId && !equipmentMatch) return fail(state, 'INVALID_TARGET_CARD', 'Solo puedes elegir una carta pÃºblica del rival.');
+  const random = seededRandom(state.seed ^ Math.imul(state.revision + 1, 0x9E3779B1) ^ Math.imul(source.seat + 1, 31) ^ target.seat);
+  const handMatch = !cardId && (randomHand || target.hand.length > 0) ? target.hand[Math.floor(random.next() * target.hand.length)] : undefined;
   const card = equipmentMatch?.[1] ?? handMatch;
   if (!card) return fail(state, 'NO_TARGET_CARD', 'El objetivo no tiene esa carta.');
   let updatedTarget = target;
@@ -184,8 +187,12 @@ const playCard = (state: GameState, command: Extract<GameCommand, { type: 'PLAY_
   if (card.name === 'PANIC' || card.name === 'CAT_BALOU') {
     if (!target?.alive || target.id === player.id) return fail(state, 'INVALID_TARGET', 'Elige otro jugador.');
     if (card.name === 'PANIC' && distanceBetween(state, player.id, target.id) > 1) return fail(state, 'OUT_OF_RANGE', 'Pánico solo alcanza distancia 1.');
+    const targetCardId = command.payload.targetCardId;
+    const publicTarget = targetCardId && (Object.values(target.equipment) as readonly (Card | null)[]).some((candidate) => candidate?.id === targetCardId);
+    if (targetCardId && !publicTarget) return fail(state, 'INVALID_TARGET_CARD', 'Solo puedes elegir una carta pública del rival.');
+    if (!targetCardId && target.hand.length === 0) return fail(state, 'NO_TARGET_CARD', 'El objetivo no tiene cartas en la mano.');
     const withoutAction = removePlayedCard(state, player, card);
-    const result = takeTargetCard(withoutAction, playerById(withoutAction, player.id)!, playerById(withoutAction, target.id)!, command.payload.targetCardId, card.name === 'CAT_BALOU');
+    const result = takeTargetCard(withoutAction, playerById(withoutAction, player.id)!, playerById(withoutAction, target.id)!, command.payload.targetCardId, command.payload.targetCardChoice === 'RANDOM_HAND', card.name === 'CAT_BALOU');
     return result.ok ? { ok: true, state: log(result.state, `${player.name} usa ${CARD_CATALOG[card.name].label} sobre ${target.name}.`, 'ACTION') } : result;
   }
   if (card.name === 'DUEL') {

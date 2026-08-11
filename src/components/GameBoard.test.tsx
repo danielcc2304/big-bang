@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createGame } from '../game/engine';
 import { characterByName } from '../game/characters/characters';
@@ -72,5 +72,34 @@ describe('GameBoard', () => {
     fireEvent.click(screen.getByRole('button', { name: `Tomar ${CARD_CATALOG[discarded.name].label}` }));
 
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'DRAW_CARDS', payload: { firstCardSource: 'DISCARD' } }));
+  });
+
+  it('permite elegir qué equipo elimina La Ingenua Explosiva', () => {
+    const base = createGame(setups, 41);
+    const cat = base.deck.find((card) => card.name === 'CAT_BALOU')!;
+    const barrel = base.deck.find((card) => card.name === 'BARREL')!;
+    const weapon = base.deck.find((card) => card.name === 'VOLCANIC')!;
+    const viewer = base.players[0]!;
+    const target = base.players[1]!;
+    const usedIds = new Set([cat.id, barrel.id, weapon.id]);
+    const hidden = base.deck.find((card) => !usedIds.has(card.id))!;
+    usedIds.add(hidden.id);
+    const state = {
+      ...base,
+      deck: base.deck.filter((card) => !usedIds.has(card.id)),
+      players: base.players.map((player) => player.id === viewer.id ? { ...player, hand: [cat] } : player.id === target.id ? { ...player, hand: [hidden], equipment: { ...player.equipment, barrel, weapon } } : player),
+      turn: { ...base.turn, currentPlayerId: viewer.id, phase: 'PLAY' as const },
+    };
+    const dispatch = vi.fn(() => true);
+
+    const view = render(<GameBoard state={state} viewerId={viewer.id} error={null} dispatch={dispatch} onExit={() => undefined} />);
+    const board = within(view.container);
+    fireEvent.click(within(board.getByTestId('hand')).getByRole('button', { name: /La Ingenua Explosiva/ }));
+    fireEvent.click(board.getByTestId(`player-${target.id}`));
+
+    expect(board.getByRole('heading', { name: 'Elige qué carta eliminar' })).toBeInTheDocument();
+    expect(board.getByRole('button', { name: /Carta aleatoria de la mano/ })).toBeInTheDocument();
+    fireEvent.click(board.getByRole('button', { name: /Barril/ }));
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'PLAY_CARD', payload: { cardId: cat.id, targetPlayerId: target.id, targetCardId: barrel.id } }));
   });
 });
