@@ -27,6 +27,8 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   const [debug, setDebug] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(sound.enabled);
   const selectedCard = viewer.hand.find((card) => card.id === selectedCardId);
+  const topDiscard = state.discard.at(-1);
+  const topDiscardDefinition = topDiscard ? CARD_CATALOG[topDiscard.name] : null;
   const isHumanTurn = state.turn.currentPlayerId === viewerId && viewer.alive;
   const canPlay = isHumanTurn && state.turn.phase === 'PLAY' && !state.reaction && !state.storeState;
 
@@ -96,7 +98,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
         <div className="table-center">
           <div className="deck-pile"><span>✦</span><small>{state.deck.length}</small></div>
           <div className="phase-seal"><b>{state.turn.phase.replaceAll('_', ' ')}</b><span>REVISIÓN {state.revision}</span></div>
-          <div className="discard-pile"><span>{state.discard[0] ? CARD_CATALOG[state.discard.at(-1)!.name].icon : '○'}</span><small>{state.discard.length}</small></div>
+          <div className="discard-pile" aria-label={topDiscardDefinition ? `Último descarte: ${topDiscardDefinition.label}` : 'Pila de descartes vacía'}><strong>{topDiscardDefinition?.label ?? 'Descarte'}</strong><span aria-hidden="true">{topDiscardDefinition?.icon ?? '○'}</span><small>{state.discard.length}</small></div>
         </div>
         <div className="viewer-panel">
           <PlayerPanel player={viewer} state={state} viewerId={viewerId} targetable={false} onSelect={() => undefined} onInspect={() => setInspected(viewer)} />
