@@ -57,7 +57,7 @@ describe('Firebase state hydration', () => {
     });
   });
 
-  it('restores room collections and nullable seat fields', () => {
+  it('normalizes numeric Firebase seat arrays and restores omitted room collections', () => {
     const game = createGame(setups, 42);
     const firebaseRoom = {
       code: 'ABC123',
@@ -66,7 +66,8 @@ describe('Firebase state hydration', () => {
       hostUid: 'uid-1',
       maxPlayers: 4,
       characterMode: 'OFFICIAL',
-      seats: { 0: { number: 0, playerId: 'human', ownerUid: 'uid-1', isBot: false, joinedAt: 1 } },
+      // Firebase returns dense integer-keyed objects as arrays from snapshot.val().
+      seats: [{ number: 0, playerId: 'human', ownerUid: 'uid-1', isBot: false, joinedAt: 1 }],
       players: {},
       coordinator: { coordinatorId: 'uid-1', coordinatorEpoch: 1, leaseUntil: 10, heartbeat: 1 },
       canonical: game,
@@ -75,6 +76,7 @@ describe('Firebase state hydration', () => {
     const hydrated = hydrateRoom(firebaseRoom);
 
     expect(hydrated.commands).toEqual({});
+    expect(Array.isArray(hydrated.seats)).toBe(false);
     expect(hydrated.seats[0]?.reconnectHash).toBeNull();
     expect(hydrated.canonical?.discard).toEqual([]);
   });
