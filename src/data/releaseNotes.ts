@@ -9,6 +9,12 @@ export const APP_VERSION = packageMetadata.version;
 
 export const RELEASE_NOTES: readonly ReleaseNotes[] = [
   {
+    version: '1.1.1',
+    changes: [
+      'Las salas online aceptan correctamente el formato de asientos que devuelve Firebase y ya no muestran el error de colecciones principales.',
+    ],
+  },
+  {
     version: '1.1.0',
     changes: [
       'Elección simultánea de personaje en online y selección entre dos pistoleros en local.',
