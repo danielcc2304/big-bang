@@ -32,6 +32,7 @@
     },
     "seatProofs": {
       "$roomId": {
+        ".read": "auth != null && root.child('rooms').child($roomId).child('coordinator/coordinatorId').val() == auth.uid",
         "$seatId": {
           ".read": "auth != null && (root.child('rooms').child($roomId).child('seats').child($seatId).child('ownerUid').val() == auth.uid || root.child('rooms').child($roomId).child('coordinator/coordinatorId').val() == auth.uid)",
           ".write": "auth != null && (root.child('rooms').child($roomId).child('seats').child($seatId).child('ownerUid').val() == auth.uid || root.child('rooms').child($roomId).child('coordinator/coordinatorId').val() == auth.uid)",
