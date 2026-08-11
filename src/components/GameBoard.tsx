@@ -18,6 +18,12 @@ interface GameBoardProps {
 }
 
 const TARGET_CARDS = new Set(['BANG', 'PANIC', 'CAT_BALOU', 'DUEL', 'JAIL']);
+const ROLE_COPY = {
+  SHERIFF: ['Sheriff', 'Elimina a todos los Forajidos y al Renegado.'],
+  DEPUTY: ['Ayudante', 'Protege al Sheriff y elimina a sus enemigos.'],
+  OUTLAW: ['Forajido', 'Elimina al Sheriff.'],
+  RENEGADE: ['Renegado', 'Sé el último con vida y elimina al Sheriff al final.'],
+} as const;
 
 const soundForLog = (message: string): Parameters<typeof sound.play>[0] => {
   if (message.includes('BANG!')) return 'bang';
@@ -108,8 +114,10 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
     dispatch(command(state, viewerId, 'DISCARD_CARDS', { cardIds: discards }));
   };
 
-  const status = state.winner ? 'Partida terminada' : state.turn.phase === 'CHARACTER_CHOICE' ? `${state.players.find((p) => p.id === state.turn.currentPlayerId)?.name ?? ''} elige personaje` : state.reaction ? `${state.players.find((p) => p.id === state.reaction?.targetPlayerId)?.name ?? ''} debe responder` : state.storeState ? `Almacén: elige ${state.players.find((p) => p.id === state.storeState?.currentPlayerId)?.name ?? ''}` : `${state.players.find((p) => p.id === state.turn.currentPlayerId)?.name ?? ''} · ${state.turn.phase}`;
+  const status = state.winner ? 'Partida terminada' : state.turn.phase === 'CHARACTER_CHOICE' ? 'La cuadrilla elige personaje' : state.reaction ? `${state.players.find((p) => p.id === state.reaction?.targetPlayerId)?.name ?? ''} debe responder` : state.storeState ? `Almacén: elige ${state.players.find((p) => p.id === state.storeState?.currentPlayerId)?.name ?? ''}` : `${state.players.find((p) => p.id === state.turn.currentPlayerId)?.name ?? ''} · ${state.turn.phase}`;
   const characterOptions = state.characterDraft?.optionsByPlayer[viewerId];
+  const viewerHasChosenCharacter = Boolean(state.characterDraft?.chosenByPlayer[viewerId]);
+  const [viewerRoleLabel, viewerRoleObjective] = ROLE_COPY[viewer.role];
 
   return (
     <main className="game-shell" onPointerDown={() => void sound.unlock()}>
@@ -123,6 +131,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
       </header>
 
       <section className="turn-banner"><span>{status}</span><em>Turno {state.turn.number}</em></section>
+      <section className={`viewer-role-banner role-${viewer.role.toLowerCase()}`} aria-label={`Tu rol es ${viewerRoleLabel}`}><span>Tu rol</span><b>{viewer.role === 'SHERIFF' ? '★ ' : ''}{viewerRoleLabel}</b><small>{viewerRoleObjective}</small></section>
       {error && <div className="error-toast" role="alert">{error}</div>}
 
       <section className="saloon-table" aria-label="Mesa de juego">
@@ -156,11 +165,11 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
       <aside className="history-panel"><h2>Últimos movimientos</h2>{state.logs.slice(-8).reverse().map((entry) => <p key={entry.id} data-tone={entry.tone}>{entry.message}</p>)}</aside>
 
       {state.turn.phase === 'CHARACTER_CHOICE' && (
-        <div className="modal-backdrop"><section className="game-modal wide" role="dialog" aria-modal="true"><span className="eyebrow">VARIANTE · DOS PERSONAJES</span>{state.turn.currentPlayerId === viewerId && characterOptions ? <><h2>Elige tu pistolero</h2><p>Compara sus vidas y habilidades. Tu personaje y su habilidad serán públicos durante toda la partida.</p><div className="character-choice-grid">{characterOptions.map((name) => { const character = characterByName(name); return <button key={name} className="character-choice-card" onClick={() => dispatch(command(state, viewerId, 'CHARACTER_CHOICE', { characterName: name }))}><span>{'♥'.repeat(character.lives)}</span><h3>{character.name}</h3><p>{character.ability}</p><b>Elegir</b></button>; })}</div></> : <><h2>La cuadrilla está eligiendo</h2><p>Ahora decide {state.players.find((player) => player.id === state.turn.currentPlayerId)?.name}. Enseguida volverá el ruido de pólvora.</p></>}</section></div>
+        <div className="modal-backdrop"><section className="game-modal wide" role="dialog" aria-modal="true"><span className="eyebrow">VARIANTE · ELECCIÓN SIMULTÁNEA</span>{!viewerHasChosenCharacter && characterOptions ? <><h2>Elige tu pistolero</h2><p>Todos podéis elegir al mismo tiempo. Tu personaje y su habilidad serán públicos durante toda la partida.</p><div className="character-choice-grid">{characterOptions.map((name) => { const character = characterByName(name); return <button key={name} className="character-choice-card" onClick={() => dispatch(command(state, viewerId, 'CHARACTER_CHOICE', { characterName: name }))}><span>{'♥'.repeat(character.lives)}</span><h3>{character.name}</h3><p>{character.ability}</p><b>Elegir</b></button>; })}</div></> : <><h2>Elección guardada</h2><p>Esperando a que termine el resto de la cuadrilla…</p></>}</section></div>
       )}
 
       {state.reaction?.targetPlayerId === viewerId && (
-        <div className="modal-backdrop"><section className="game-modal" role="dialog" aria-modal="true"><span className="eyebrow">REACCIÓN</span><h2>{state.reaction.type}</h2><p>Necesitas {state.reaction.requiredCards - state.reaction.cardsPlayed} carta(s) válida(s).</p><div className="card-rail modal-rail">{viewer.hand.filter((card) => state.reaction?.type === 'INDIANS' || state.reaction?.type === 'DUEL' ? card.name === 'BANG' || viewer.character.name === 'Calamity Janet' && card.name === 'MISSED' : card.name === 'MISSED' || viewer.character.name === 'Calamity Janet' && card.name === 'BANG').map((card) => <CardView key={card.id} card={card} selected={reactionCards.includes(card.id)} onClick={() => toggleReaction(card.id)} />)}</div><div className="modal-actions"><button onClick={() => resolveReaction([])}>Recibir daño</button><button className="primary-action" disabled={reactionCards.length < state.reaction.requiredCards - state.reaction.cardsPlayed} onClick={() => resolveReaction(reactionCards)}>Responder</button></div></section></div>
+        <div className="modal-backdrop"><section className="game-modal" role="dialog" aria-modal="true"><span className="eyebrow">REACCIÓN</span><h2>{state.reaction.type}</h2><p>Necesitas {state.reaction.requiredCards - state.reaction.cardsPlayed} carta(s) válida(s). Si no tienes ninguna, pulsa <b>Recibir daño</b> para continuar.</p><div className="card-rail modal-rail">{viewer.hand.filter((card) => state.reaction?.type === 'INDIANS' || state.reaction?.type === 'DUEL' ? card.name === 'BANG' || viewer.character.name === 'Calamity Janet' && card.name === 'MISSED' : card.name === 'MISSED' || viewer.character.name === 'Calamity Janet' && card.name === 'BANG').map((card) => <CardView key={card.id} card={card} selected={reactionCards.includes(card.id)} onClick={() => toggleReaction(card.id)} />)}</div><div className="modal-actions"><button className="danger-action" onClick={() => resolveReaction([])}>Recibir daño</button><button className="primary-action" disabled={reactionCards.length < state.reaction.requiredCards - state.reaction.cardsPlayed} onClick={() => resolveReaction(reactionCards)}>Responder</button></div></section></div>
       )}
 
       {state.storeState?.currentPlayerId === viewerId && (

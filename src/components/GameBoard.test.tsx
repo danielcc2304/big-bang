@@ -42,4 +42,15 @@ describe('GameBoard', () => {
 
     expect(dispatch).not.toHaveBeenCalled();
   });
+
+  it('destaca públicamente al Sheriff y explica el rol propio', () => {
+    const state = createGame(setups, 33);
+    const viewer = state.players[0]!;
+    const view = render(<GameBoard state={{ ...state, turn: { ...state.turn, currentPlayerId: setups[1]!.id, phase: 'PLAY' } }} viewerId={viewer.id} error={null} dispatch={() => true} onExit={() => undefined} />);
+
+    expect(view.container.querySelectorAll('.sheriff-star')).toHaveLength(1);
+    const roleBanner = view.container.querySelector('.viewer-role-banner');
+    expect(roleBanner).toHaveTextContent('Tu rol');
+    expect(roleBanner).toHaveTextContent(viewer.role === 'SHERIFF' ? 'Sheriff' : viewer.role === 'DEPUTY' ? 'Ayudante' : viewer.role === 'OUTLAW' ? 'Forajido' : 'Renegado');
+  });
 });

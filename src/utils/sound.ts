@@ -21,7 +21,7 @@ export class SoundService {
   private lastEffectAt = new Map<SoundName, number>();
   enabled = localStorage.getItem('bang:sound') !== 'off';
   musicEnabled = localStorage.getItem('bang:music') !== 'off';
-  volume = 0.45;
+  volume = 0.72;
 
   async unlock(): Promise<boolean> {
     if (!this.enabled) return false;
@@ -38,7 +38,7 @@ export class SoundService {
       this.musicGain.connect(this.context.destination);
     }
     this.effectsGain.gain.value = this.volume;
-    this.musicGain.gain.value = this.musicTimer !== null || this.musicStart !== null ? this.volume * .12 : 0;
+    this.musicGain.gain.value = this.musicTimer !== null || this.musicStart !== null ? this.volume * .42 : 0;
     if (this.context.state === 'suspended') await this.context.resume();
     return this.context.state === 'running';
   }
@@ -77,7 +77,7 @@ export class SoundService {
 
   private async beginMusic(generation: number): Promise<void> {
     if (!await this.unlock() || !this.context || !this.musicGain || generation !== this.musicGeneration || !this.enabled || !this.musicEnabled) return;
-    this.musicGain.gain.value = this.volume * .12;
+    this.musicGain.gain.value = this.volume * .42;
     const scheduleBar = (): void => {
       if (!this.context || !this.musicGain || generation !== this.musicGeneration) return;
       const context = this.context;

@@ -23,6 +23,7 @@
           }
         },
         "coordinator": {
+          ".write": "auth != null && (data.child('coordinatorId').val() == auth.uid || (data.child('leaseUntil').val() <= now && (root.child('rooms').child($roomId).child('seats').child('0').child('ownerUid').val() == auth.uid || root.child('rooms').child($roomId).child('seats').child('1').child('ownerUid').val() == auth.uid || root.child('rooms').child($roomId).child('seats').child('2').child('ownerUid').val() == auth.uid || root.child('rooms').child($roomId).child('seats').child('3').child('ownerUid').val() == auth.uid || root.child('rooms').child($roomId).child('seats').child('4').child('ownerUid').val() == auth.uid || root.child('rooms').child($roomId).child('seats').child('5').child('ownerUid').val() == auth.uid || root.child('rooms').child($roomId).child('seats').child('6').child('ownerUid').val() == auth.uid)))",
           ".validate": "newData.hasChildren(['coordinatorId','coordinatorEpoch','leaseUntil','heartbeat']) && newData.child('coordinatorEpoch').isNumber() && newData.child('leaseUntil').isNumber()"
         },
         "canonical": {

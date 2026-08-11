@@ -285,7 +285,6 @@ const handleCommand = (state: GameState, command: GameCommand): CommandResult =>
     }
     case 'CHARACTER_CHOICE': {
       if (state.turn.phase !== 'CHARACTER_CHOICE') return fail(state, 'NOT_CHARACTER_CHOICE', 'La elección de personaje ya terminó.');
-      if (state.turn.currentPlayerId !== player.id) return fail(state, 'NOT_YOUR_CHARACTER_CHOICE', 'Ahora elige otro jugador.');
       const draft = state.characterDraft;
       if (!draft) return fail(state, 'NO_CHARACTER_DRAFT', 'No hay una selección de personajes activa.');
       if (draft.chosenByPlayer[player.id]) return fail(state, 'CHARACTER_ALREADY_CHOSEN', 'Ya elegiste personaje.');

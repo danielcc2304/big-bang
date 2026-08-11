@@ -48,6 +48,8 @@ describe('SoundService', () => {
   it('unlocks Web Audio and schedules an effect', async () => {
     const service = new SoundService();
 
+    expect(service.volume).toBeGreaterThan(0.7);
+
     service.play('bang');
     await vi.waitFor(() => expect(audio.createOscillator).toHaveBeenCalledTimes(1));
 
