@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { GameCommand, GameState } from '../types';
-import { decideAiCommand, initialKnowledge } from '../game/ai';
+import { aiDecisionDelay, decideAiCommand, initialKnowledge } from '../game/ai';
 import { applyCommand, createGame, type PlayerSetup } from '../game/engine';
 
 export interface LocalGameController {
@@ -10,7 +10,7 @@ export interface LocalGameController {
 }
 
 export const useLocalGame = (setups: readonly PlayerSetup[], seed: number): LocalGameController => {
-  const [state, setState] = useState(() => createGame(setups, seed));
+  const [state, setState] = useState(() => createGame(setups, seed, 'DRAFT_TWO'));
   const [error, setError] = useState<string | null>(null);
   const knowledge = useMemo(() => Object.fromEntries(setups.filter((setup) => setup.kind === 'AI').map((setup) => [setup.id, initialKnowledge(state, setup.id)])), [setups, state]);
 
@@ -34,7 +34,7 @@ export const useLocalGame = (setups: readonly PlayerSetup[], seed: number): Loca
     const timer = window.setTimeout(() => {
       const aiCommand = decideAiCommand(state, active.id, knowledge[active.id] ?? initialKnowledge(state, active.id));
       if (aiCommand) dispatch(aiCommand);
-    }, 420);
+    }, aiDecisionDelay(state));
     return () => window.clearTimeout(timer);
   }, [dispatch, knowledge, state]);
 

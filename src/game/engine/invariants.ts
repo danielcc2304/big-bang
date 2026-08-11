@@ -17,6 +17,8 @@ export const collectCards = (state: GameState): readonly Card[] => [
 
 export const validateGameState = (state: GameState): readonly string[] => {
   const errors: string[] = [];
+  const playerIds = state.players.map((player) => player.id);
+  if (new Set(playerIds).size !== playerIds.length) errors.push('Hay jugadores duplicados en el estado canónico.');
   const ids = collectCards(state).map((card) => card.id);
   if (new Set(ids).size !== ids.length) {
     const duplicates = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
@@ -39,6 +41,11 @@ export const validateGameState = (state: GameState): readonly string[] => {
   state.players.forEach((player) => {
     if (player.lives > player.maxLives) errors.push(`${player.name} supera sus vidas máximas.`);
     if (player.lives < 0) errors.push(`${player.name} tiene vidas negativas.`);
+  });
+  if (state.turn.phase === 'CHARACTER_CHOICE' && !state.characterDraft) errors.push('Falta la selección de personajes.');
+  if (state.characterDraft && state.turn.phase !== 'CHARACTER_CHOICE') errors.push('La selección de personajes está activa fuera de su fase.');
+  if (state.characterDraft) Object.entries(state.characterDraft.chosenByPlayer).forEach(([playerId, character]) => {
+    if (!state.characterDraft?.optionsByPlayer[playerId]?.includes(character)) errors.push(`${playerId} eligió un personaje no ofrecido.`);
   });
   if (state.storeState) {
     const picked = Object.values(state.storeState.pickedBy);

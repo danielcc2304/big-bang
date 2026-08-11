@@ -113,7 +113,7 @@ No uses reglas globales `.read: true` / `.write: true`. No añadas cuentas de se
 
 ### Reconexión
 
-Al reservar un asiento se crea un secreto de recuperación largo. Firebase solo almacena su SHA-256 en una rama protegida; el secreto queda en el dispositivo y también puede copiarse desde el lobby para recuperarlo en otro. Conocer el nombre de un jugador no permite reclamar su asiento. Para cambiar de dispositivo debe quedar algún coordinador humano conectado que valide la solicitud; el dispositivo original puede volver directamente gracias a su identidad anónima persistente.
+Al reservar un asiento se crea un secreto de recuperación largo. Firebase solo almacena su SHA-256 en una rama protegida; el secreto queda en el dispositivo y también puede copiarse desde el lobby para recuperarlo en otro. Conocer el nombre de un jugador no permite reclamar su asiento. La solicitud se valida con el hash y puede procesarse aunque no quede ningún coordinador activo; el dispositivo original puede volver directamente gracias a su identidad anónima persistente.
 
 ## Despliegue en Vercel
 
@@ -145,7 +145,22 @@ No subas `.env.local` a Vercel ni al repositorio; usa siempre el panel de variab
 
 ## Tests
 
-La suite cubre 37 casos de motor y concurrencia, entre ellos roles, barajado, Sheriff, BANG/Fallaste, Slab, Calamity, Willy, Volcanic, Barril, Prisión, Dinamita, Pánico/Cat Balou sobre Volcanic, Duelo, Indios, Gatling, ciclo completo de Almacén, doble tap, carrera por una carta, descarte, muerte, recompensas, Vulture Sam, victoria, reconexión, comandos duplicados, revisión antigua, invariantes, failover del coordinador y 30 simulaciones largas de partidas completas controladas por IA.
+La suite cubre 89 pruebas automatizadas de motor, concurrencia, hidratación y reglas, entre ellas roles, barajado, Sheriff, BANG/Fallaste, Slab, Calamity, Willy, Volcanic, Barril, Prisión, Dinamita, Pánico/Cat Balou sobre Volcanic, Duelo, Indios, Gatling, ciclo completo de Almacén, doble tap, carrera por una carta, descarte, muerte, recompensas, Vulture Sam, victoria, reconexión, comandos duplicados, revisión antigua, invariantes, failover del coordinador y 30 simulaciones largas de partidas completas controladas por IA.
+
+## Auditoria de robustez online
+
+El flujo online incluye lease de coordinador con epoch, renovacion estable y toma de control tras caducidad; heartbeat por conexion, limpieza de conexiones huerfanas y automatizacion de humanos desconectados solo despues de la gracia; reclamacion de asiento con hash incluso cuando no queda coordinador activo; cola limitada a 100 slots RTDB, validacion de comandos, reintentos idempotentes y recibos `APPLIED`/`REJECTED`; transiciones monotónicas `LOBBY` -> `PLAYING` -> `ENDED`; y reglas adversariales ejecutables en el emulador local.
+
+Validaciones recomendadas antes de publicar:
+
+```bash
+npm run validate:rules
+npm run test:rules
+npm test -- --run
+npm run lint
+npm run build
+npm audit --audit-level=high
+```
 
 ## Decisiones frente al HTML legado
 
@@ -153,7 +168,7 @@ El HTML `bang_saloon_online_v4_13_self_healing.html` se usó como inventario fun
 
 ## Limitaciones conocidas
 
-- La variante visual de elegir entre dos personajes está tipada en sala y el comando `CHARACTER_CHOICE` existe, pero la pantalla de draft online aún no bloquea el inicio para recopilar elecciones; las partidas comienzan con preparación oficial.
+- La variante online permite que todos los humanos elijan simultáneamente entre dos personajes aleatorios; las elecciones concurrentes se serializan de forma autoritativa antes de repartir las manos.
 - Las habilidades con decisión durante el robo de Jesse Jones, Kit Carlson y Pedro Ramirez tienen estructura de conocimiento preparada, pero la primera IA usa el robo estándar. Las habilidades automáticas y las activas de combate sí están modeladas.
 - Las reglas de Firebase proporcionadas son un punto de partida endurecido para autenticación anónima y autoridad de coordinador. Antes de operar una comunidad pública conviene añadir App Check, límites de tamaño/frecuencia y limpieza automática de salas terminadas.
 - En el despliegue exclusivamente cliente descrito aquí, los miembros autenticados de una sala reciben el estado canónico completo para poder asumir el lease. La interfaz oculta manos y roles ajenos, pero un usuario que inspeccione directamente el tráfico podría verlos. Un entorno competitivo con protección anti-trampas requiere mover el procesador de comandos a Cloud Functions o a un servidor de confianza y publicar vistas privadas por UID.

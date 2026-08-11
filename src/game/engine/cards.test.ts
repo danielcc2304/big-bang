@@ -28,6 +28,32 @@ describe('cartas de acción y equipo', () => {
     expect(state.players[2]!.equipment.weapon).toBeNull();
   });
 
+  it('Cat Balou permite elegir una carta pública concreta entre varias', () => {
+    let state = playPhase(testState()); const cat = makeCard('CAT_BALOU', 'cat-choice'); const volcanic = makeCard('VOLCANIC', 'volcanic-choice'); const barrel = makeCard('BARREL', 'barrel-choice');
+    state = patchPlayer(state, 'p0', { hand: [cat] }); state = patchPlayer(state, 'p2', { equipment: { ...state.players[2]!.equipment, weapon: volcanic, barrel } });
+    state = run(state, command(state, 'p0', 'PLAY_CARD', { cardId: cat.id, targetPlayerId: 'p2', targetCardId: barrel.id }));
+    expect(state.players[2]!.equipment.weapon?.id).toBe(volcanic.id);
+    expect(state.players[2]!.equipment.barrel).toBeNull();
+    expect(state.discard.at(-1)?.id).toBe(barrel.id);
+  });
+
+  it('Cat Balou no permite indicar el id de una carta oculta', () => {
+    let state = playPhase(testState()); const cat = makeCard('CAT_BALOU', 'cat-hidden'); const hidden = makeCard('MUSTANG', 'hidden-choice');
+    state = patchPlayer(state, 'p0', { hand: [cat] }); state = patchPlayer(state, 'p2', { hand: [hidden] });
+    const result = applyCommand(state, command(state, 'p0', 'PLAY_CARD', { cardId: cat.id, targetPlayerId: 'p2', targetCardId: hidden.id }));
+    expect(result.ok).toBe(false);
+    expect(result.state).toBe(state);
+    expect(state.players[0]!.hand).toContain(cat);
+  });
+
+  it('Cat Balou permite escoger una carta aleatoria de la mano', () => {
+    let state = playPhase(testState()); const cat = makeCard('CAT_BALOU', 'cat-random'); const hiddenA = makeCard('MUSTANG', 'hidden-a'); const hiddenB = makeCard('BARREL', 'hidden-b');
+    state = patchPlayer(state, 'p0', { hand: [cat] }); state = patchPlayer(state, 'p2', { hand: [hiddenA, hiddenB] });
+    state = run(state, command(state, 'p0', 'PLAY_CARD', { cardId: cat.id, targetPlayerId: 'p2', targetCardChoice: 'RANDOM_HAND' }));
+    expect(state.players[2]!.hand).toHaveLength(1);
+    expect(state.discard).toHaveLength(2);
+  });
+
   it('Prisión no puede jugarse sobre el Sheriff', () => {
     let state = playPhase(testState()); const jail = makeCard('JAIL', 'jail');
     state = patchPlayer(state, 'p0', { hand: [jail] }); state = patchPlayer(state, 'p1', { role: 'SHERIFF' });
@@ -40,6 +66,8 @@ describe('cartas de acción y equipo', () => {
     state = patchPlayer(state, 'p0', { equipment: { ...state.players[0]!.equipment, jail } });
     state = run(state, command(state, 'p0', 'RESOLVE_TURN_START', {}));
     expect(state.turn.currentPlayerId).toBe('p1'); expect(state.players[0]!.equipment.jail).toBeNull();
+    expect(state.logs.at(-1)?.message).toContain('permanece encerrado');
+    expect(state.logs.at(-1)?.effect).toMatchObject({ card: spade, success: false });
   });
 
   it('Dinamita explota con picas entre 2 y 9', () => {
@@ -50,6 +78,8 @@ describe('cartas de acción y equipo', () => {
     state = run(state, command(state, 'p0', 'RESOLVE_TURN_START', {}));
     expect(state.players[0]!.lives).toBe(Math.max(0, before - 3));
     expect(state.discard.some((card) => card.id === dynamite.id)).toBe(true);
+    expect(state.logs.at(-1)?.message).toContain('explota');
+    expect(state.logs.at(-1)?.effect).toMatchObject({ card: spade, success: false, headline: '¡BOOM!' });
   });
 
   it('Almacén entrega exactamente una carta por jugador y vacía el pool', () => {
@@ -90,5 +120,14 @@ describe('cartas de acción y equipo', () => {
     expect(state.turn.phase).toBe('DISCARD'); expect(state.turn.pendingDiscardCount).toBe(3);
     state = run(state, command(state, 'p0', 'DISCARD_CARDS', { cardIds: hand.slice(3).map((card) => card.id) }));
     expect(state.players[0]!.hand.map((card) => card.id)).toEqual(hand.slice(0, 3).map((card) => card.id));
+  });
+
+  it('recalcula el límite al confirmar incluso si el contador pendiente quedó obsoleto', () => {
+    let state = playPhase(testState()); const hand = Array.from({ length: 6 }, (_, i) => makeCard('BANG', `stale-h${i}`));
+    state = patchPlayer(state, 'p0', { hand, lives: 3 });
+    state = { ...state, turn: { ...state.turn, phase: 'DISCARD', pendingDiscardCount: 1 } };
+    state = run(state, command(state, 'p0', 'DISCARD_CARDS', { cardIds: hand.slice(3).map((card) => card.id) }));
+    expect(state.players[0]!.hand).toHaveLength(3);
+    expect(state.logs.at(-1)?.message).toContain('termina con 3');
   });
 });
