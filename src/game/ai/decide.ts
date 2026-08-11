@@ -13,17 +13,21 @@ export const aiDecisionDelay = (state: GameState): number => {
   return 1_450;
 };
 
-const targetScore = (actor: Player, target: Player, knowledge: AiKnowledge): number => {
-  if (target.role === 'SHERIFF') return actor.role === 'OUTLAW' ? 100 : actor.role === 'DEPUTY' ? -100 : 20;
+const targetScore = (state: GameState, actor: Player, target: Player, knowledge: AiKnowledge): number => {
+  if (target.role === 'SHERIFF') {
+    if (actor.role === 'OUTLAW') return 100;
+    if (actor.role === 'RENEGADE') return state.players.filter((player) => player.alive).length === 2 ? 100 : -100;
+    return -100;
+  }
   const suspicion = knowledge.suspicions[target.id];
   if (actor.role === 'SHERIFF' || actor.role === 'DEPUTY') return (suspicion?.outlaw ?? 0.3) * 10;
-  return actor.role === 'RENEGADE' ? target.lives * 0.2 : 1;
+  return actor.role === 'RENEGADE' ? 10 + target.lives + (suspicion?.outlaw ?? 0) * 10 : 1;
 };
 
 const chooseTarget = (state: GameState, actor: Player, knowledge: AiKnowledge, range?: number, predicate: (target: Player) => boolean = () => true): Player | undefined =>
   state.players
     .filter((target) => target.alive && target.id !== actor.id && predicate(target) && (range === undefined || distanceBetween(state, actor.id, target.id) <= range))
-    .sort((a, b) => targetScore(actor, b, knowledge) - targetScore(actor, a, knowledge) || a.lives - b.lives)[0];
+    .sort((a, b) => targetScore(state, actor, b, knowledge) - targetScore(state, actor, a, knowledge) || a.lives - b.lives)[0];
 
 export const decideAiCommand = (state: GameState, playerId: string, knowledge: AiKnowledge): GameCommand | null => {
   const actor = state.players.find((player) => player.id === playerId);
@@ -60,7 +64,12 @@ export const decideAiCommand = (state: GameState, playerId: string, knowledge: A
   if (drawCard) return command(state, actor.id, 'PLAY_CARD', { cardId: drawCard.id });
   const equipment = actor.hand.find((card) => card.kind === 'WEAPON' || ['BARREL', 'MUSTANG', 'SCOPE', 'DYNAMITE'].includes(card.name));
   if (equipment) return command(state, actor.id, 'PLAY_CARD', { cardId: equipment.id });
-  const area = actor.hand.find((card) => card.name === 'GATLING' || card.name === 'INDIANS' || card.name === 'SALOON' || card.name === 'GENERAL_STORE');
+  const aliveCount = state.players.filter((player) => player.alive).length;
+  const area = actor.hand.find((card) => {
+    if (card.name === 'SALOON' || card.name === 'GENERAL_STORE') return true;
+    if (card.name !== 'GATLING' && card.name !== 'INDIANS') return false;
+    return actor.role === 'OUTLAW' || actor.role === 'SHERIFF' || actor.role === 'RENEGADE' && aliveCount === 2;
+  });
   if (area) return command(state, actor.id, 'PLAY_CARD', { cardId: area.id });
   const panic = actor.hand.find((card) => card.name === 'PANIC');
   const hasTakeableCard = (target: Player): boolean => target.hand.length > 0 || publicEquipment(target).length > 0;
