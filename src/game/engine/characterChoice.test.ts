@@ -18,8 +18,7 @@ describe('variante de elección entre dos personajes', () => {
     expect(offered).toHaveLength(8);
     expect(new Set(offered)).toHaveLength(8);
 
-    for (const player of state.players) {
-      expect(state.turn.currentPlayerId).toBe(player.id);
+    for (const player of [...state.players].reverse()) {
       const choice = state.characterDraft!.optionsByPlayer[player.id]![1];
       const result = applyCommand(state, command(state, player.id, 'CHARACTER_CHOICE', { characterName: choice }));
       expect(result.ok).toBe(true);

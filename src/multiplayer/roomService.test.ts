@@ -16,6 +16,7 @@ vi.mock('firebase/database', () => ({
   push: vi.fn(() => ({ key: 'command-key' })),
   ref: databaseMocks.ref,
   runTransaction: databaseMocks.runTransaction,
+  serverTimestamp: vi.fn(() => 1234),
   set: databaseMocks.set,
   update: databaseMocks.update,
 }));

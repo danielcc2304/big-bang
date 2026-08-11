@@ -1,4 +1,4 @@
-import { get, onDisconnect, onValue, push, ref, runTransaction, set, update } from 'firebase/database';
+import { get, onDisconnect, onValue, push, ref, runTransaction, serverTimestamp, set, update } from 'firebase/database';
 import type { GameCommand, OnlinePlayer, Room, Seat } from '../types';
 import { ensureAnonymousUser, firebaseServices } from '../firebase/client';
 import { createReconnectToken, hashReconnectToken, saveReconnectToken } from './identity';
@@ -163,7 +163,7 @@ export const startOnlineGame = async (code: string, uid: string): Promise<void> 
 const configurePresence = async (code: string, playerId: string, uid: string): Promise<void> => {
   const services = firebaseServices()!;
   const presence = ref(services.database, `rooms/${code}/players/${playerId}`);
-  await onDisconnect(presence).update({ connected: false, lastSeen: Date.now(), uid });
+  await onDisconnect(presence).update({ connected: false, lastSeen: serverTimestamp(), uid });
   await update(presence, { connected: true, lastSeen: Date.now(), uid });
 };
 

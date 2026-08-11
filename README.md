@@ -153,7 +153,7 @@ El HTML `bang_saloon_online_v4_13_self_healing.html` se usó como inventario fun
 
 ## Limitaciones conocidas
 
-- La variante visual de elegir entre dos personajes está tipada en sala y el comando `CHARACTER_CHOICE` existe, pero la pantalla de draft online aún no bloquea el inicio para recopilar elecciones; las partidas comienzan con preparación oficial.
+- La variante online permite que todos los humanos elijan simultáneamente entre dos personajes aleatorios; las elecciones concurrentes se serializan de forma autoritativa antes de repartir las manos.
 - Las habilidades con decisión durante el robo de Jesse Jones, Kit Carlson y Pedro Ramirez tienen estructura de conocimiento preparada, pero la primera IA usa el robo estándar. Las habilidades automáticas y las activas de combate sí están modeladas.
 - Las reglas de Firebase proporcionadas son un punto de partida endurecido para autenticación anónima y autoridad de coordinador. Antes de operar una comunidad pública conviene añadir App Check, límites de tamaño/frecuencia y limpieza automática de salas terminadas.
 - En el despliegue exclusivamente cliente descrito aquí, los miembros autenticados de una sala reciben el estado canónico completo para poder asumir el lease. La interfaz oculta manos y roles ajenos, pero un usuario que inspeccione directamente el tráfico podría verlos. Un entorno competitivo con protección anti-trampas requiere mover el procesador de comandos a Cloud Functions o a un servidor de confianza y publicar vistas privadas por UID.

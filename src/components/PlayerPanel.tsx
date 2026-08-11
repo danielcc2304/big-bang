@@ -16,9 +16,10 @@ export const PlayerPanel = ({ player, state, viewerId, targetable, onSelect, onI
   const role = player.role === 'SHERIFF' || player.id === viewerId || !player.alive ? player.role : 'SECRET';
   const equipment = Object.values(player.equipment).filter((card): card is Card => card !== null);
   return (
-    <article className={`player-panel ${active ? 'active' : ''} ${!player.alive ? 'dead' : ''} ${targetable ? 'targetable' : ''}`}>
+    <article className={`player-panel ${active ? 'active' : ''} ${player.role === 'SHERIFF' ? 'sheriff' : ''} ${!player.alive ? 'dead' : ''} ${targetable ? 'targetable' : ''}`}>
+      {player.role === 'SHERIFF' && <span className="sheriff-star" aria-label="Sheriff">★</span>}
       <button className="player-main" onClick={targetable ? onSelect : onInspect} data-testid={`player-${player.id}`}>
-        <span className="role-tag">{role === 'SECRET' ? 'ROL SECRETO' : role}</span>
+        <span className="role-tag">{role === 'SECRET' ? 'ROL SECRETO' : role === 'SHERIFF' ? 'SHERIFF' : role === 'DEPUTY' ? 'AYUDANTE' : role === 'OUTLAW' ? 'FORAJIDO' : 'RENEGADO'}</span>
         <span className="player-name">{player.name}</span>
         <span className="character-name">{player.character.name}</span>
         <span className="character-ability">{player.character.ability}</span>
