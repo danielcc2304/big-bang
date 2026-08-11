@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const databaseMocks = vi.hoisted(() => ({
   get: vi.fn(),
-  onDisconnectUpdate: vi.fn(),
+  onDisconnectSet: vi.fn(),
   ref: vi.fn((_database: unknown, path: string) => path),
   runTransaction: vi.fn(),
   set: vi.fn(),
@@ -11,7 +11,7 @@ const databaseMocks = vi.hoisted(() => ({
 
 vi.mock('firebase/database', () => ({
   get: databaseMocks.get,
-  onDisconnect: vi.fn(() => ({ update: databaseMocks.onDisconnectUpdate })),
+  onDisconnect: vi.fn(() => ({ set: databaseMocks.onDisconnectSet })),
   onValue: vi.fn(),
   push: vi.fn(() => ({ key: 'command-key' })),
   ref: databaseMocks.ref,
@@ -69,7 +69,7 @@ describe('joinRoom', () => {
     });
     databaseMocks.set.mockResolvedValue(undefined);
     databaseMocks.update.mockResolvedValue(undefined);
-    databaseMocks.onDisconnectUpdate.mockResolvedValue(undefined);
+    databaseMocks.onDisconnectSet.mockResolvedValue(undefined);
   });
 
   it('reserva un asiento hijo compatible con las reglas de Firebase', async () => {
@@ -99,6 +99,14 @@ describe('joinRoom', () => {
     expect(databaseMocks.set).toHaveBeenCalledWith(
       'seatProofs/ABC123/1',
       'a'.repeat(64),
+    );
+    expect(databaseMocks.onDisconnectSet).toHaveBeenCalledWith(expect.objectContaining({
+      uid: 'tablet-user-1234567890',
+      connected: false,
+      lastSeen: 1234,
+    }));
+    expect(databaseMocks.onDisconnectSet.mock.invocationCallOrder[0]).toBeLessThan(
+      databaseMocks.set.mock.invocationCallOrder.at(-1)!,
     );
   });
 
