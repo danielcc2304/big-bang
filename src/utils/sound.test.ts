@@ -81,4 +81,25 @@ describe('SoundService', () => {
     expect(vi.getTimerCount()).toBe(1);
     service.stopMusic();
   });
+
+  it('usa webkitAudioContext cuando el navegador no expone AudioContext', async () => {
+    vi.useFakeTimers();
+    const AudioContextMock = vi.fn(() => ({
+      state: 'running',
+      currentTime: 1,
+      destination: {},
+      createGain: audio.createGain,
+      createOscillator: audio.createOscillator,
+      resume: audio.resume,
+    }));
+    vi.stubGlobal('AudioContext', undefined);
+    vi.stubGlobal('webkitAudioContext', AudioContextMock);
+    const service = new SoundService();
+
+    await service.startMusic();
+
+    expect(AudioContextMock).toHaveBeenCalledTimes(1);
+    expect(service.musicPlaying).toBe(true);
+    service.stopMusic();
+  });
 });

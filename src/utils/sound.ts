@@ -10,6 +10,12 @@ const EFFECTS: Record<SoundName, readonly [number, number, OscillatorType]> = {
 // Original, restrained saloon loop. It stays synthesized so the project ships no licensed recording.
 const WESTERN_MELODY = [330, 392, 440, 392, 330, 294, 262, 294, 330, 392, 440, 494, 440, 392, 330, 294] as const;
 const WESTERN_BASS = [82, 98, 110, 98] as const;
+type AudioContextConstructor = new () => AudioContext;
+
+const audioContextConstructor = (): AudioContextConstructor | undefined => {
+  if (typeof globalThis.AudioContext === 'function') return globalThis.AudioContext;
+  return (globalThis as typeof globalThis & { webkitAudioContext?: AudioContextConstructor }).webkitAudioContext;
+};
 
 export class SoundService {
   private context: AudioContext | null = null;
@@ -28,8 +34,9 @@ export class SoundService {
   async unlock(): Promise<boolean> {
     if (!this.enabled) return false;
     if (!this.context) {
-      if (typeof AudioContext === 'undefined') return false;
-      this.context = new AudioContext();
+      const AudioContextClass = audioContextConstructor();
+      if (!AudioContextClass) return false;
+      this.context = new AudioContextClass();
     }
     if (!this.effectsGain) {
       this.effectsGain = this.context.createGain();

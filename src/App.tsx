@@ -78,16 +78,20 @@ export default function App() {
   const runOnline = (work: Promise<RoomIdentity>): void => { setOnlineError(null); void work.then((next) => { remember(); sound.play('connect'); setIdentity(next); }).catch((cause: unknown) => { sound.play('error'); setOnlineError(cause instanceof Error ? cause.message : 'No se pudo conectar.'); }); };
   const recover = (): void => { const token = recovery || loadReconnectToken(code); if (!token) { setOnlineError('Introduce la clave de recuperación de ese asiento.'); return; } runOnline(reconnectToRoom(code, token)); };
   const toggleMusic = (): void => {
-    if (musicEnabled && !musicPlaying) {
-      void sound.startMusic().then(() => setMusicPlaying(sound.musicPlaying)).catch(() => setMusicPlaying(false));
+    if (musicPlaying) {
+      sound.setMusicEnabled(false);
+      setMusicEnabled(false);
+      setMusicPlaying(false);
       return;
     }
-    const next = !musicEnabled;
-    if (next && !sound.enabled) sound.setEnabled(true);
-    sound.setMusicEnabled(next);
-    setMusicEnabled(next);
-    if (next) void sound.startMusic().then(() => setMusicPlaying(sound.musicPlaying)).catch(() => setMusicPlaying(false));
-    else setMusicPlaying(false);
+    if (!sound.enabled) sound.setEnabled(true);
+    sound.setMusicEnabled(true);
+    setMusicEnabled(true);
+    void sound.startMusic().then(() => {
+      const playing = sound.musicPlaying;
+      setMusicPlaying(playing);
+      if (!playing) setMusicEnabled(false);
+    }).catch(() => { setMusicEnabled(false); setMusicPlaying(false); });
   };
   return (
     <main className="home-screen">
