@@ -23,6 +23,8 @@ export class SoundService {
   musicEnabled = localStorage.getItem('bang:music') !== 'off';
   volume = 0.72;
 
+  get musicPlaying(): boolean { return this.musicTimer !== null; }
+
   async unlock(): Promise<boolean> {
     if (!this.enabled) return false;
     if (!this.context) {
@@ -38,7 +40,7 @@ export class SoundService {
       this.musicGain.connect(this.context.destination);
     }
     this.effectsGain.gain.value = this.volume;
-    this.musicGain.gain.value = this.musicTimer !== null || this.musicStart !== null ? this.volume * .42 : 0;
+    this.musicGain.gain.value = this.musicTimer !== null || this.musicStart !== null ? this.volume * .62 : 0;
     if (this.context.state === 'suspended') await this.context.resume();
     return this.context.state === 'running';
   }
@@ -77,7 +79,7 @@ export class SoundService {
 
   private async beginMusic(generation: number): Promise<void> {
     if (!await this.unlock() || !this.context || !this.musicGain || generation !== this.musicGeneration || !this.enabled || !this.musicEnabled) return;
-    this.musicGain.gain.value = this.volume * .42;
+    this.musicGain.gain.value = this.volume * .62;
     const scheduleBar = (): void => {
       if (!this.context || !this.musicGain || generation !== this.musicGeneration) return;
       const context = this.context;
@@ -85,10 +87,10 @@ export class SoundService {
       const eighth = 60 / 104 / 2;
       const start = context.currentTime + .04;
       WESTERN_MELODY.forEach((frequency, index) => {
-        this.scheduleTone(frequency, start + index * eighth, eighth * .55, 'triangle', .08, musicGain);
+        this.scheduleTone(frequency, start + index * eighth, eighth * .55, 'triangle', .11, musicGain);
       });
       WESTERN_BASS.forEach((frequency, index) => {
-        this.scheduleTone(frequency, start + index * eighth * 4, eighth * 2.1, 'sine', .12, musicGain);
+        this.scheduleTone(frequency, start + index * eighth * 4, eighth * 2.1, 'sine', .15, musicGain);
       });
     };
     scheduleBar();

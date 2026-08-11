@@ -31,6 +31,7 @@
   .mode-tabs{margin:24px 0 18px}
   .setup-line{grid-template-columns:minmax(0,1fr) 92px;gap:8px}
   .setup-line label,.online-actions>*{min-width:0}
+  .setup-line input,.setup-line select{min-width:0;max-width:100%}
   .hero-visual{width:100%;min-height:330px;overflow:visible}
   .sun-disc{width:250px;height:250px;top:4%;right:50%;transform:translateX(50%)}
   .saloon-silhouette{width:112%;height:52%;right:-6%;bottom:0}
@@ -42,6 +43,10 @@
   .online-section{padding-top:58px}
   .online-actions{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .online-actions button{padding-inline:10px}
+}
+
+@media(max-width:380px){
+  .setup-line{grid-template-columns:1fr}
 }
 
 .online-form select{display:block;width:100%;margin:7px 0 14px;background:#e4d4b2;color:#28170e;border:1px solid #9e8765;border-radius:2px;padding:12px 13px}
