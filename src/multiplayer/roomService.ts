@@ -2,6 +2,7 @@ import { get, onDisconnect, onValue, push, ref, runTransaction, set, update } fr
 import type { GameCommand, OnlinePlayer, Room, Seat } from '../types';
 import { ensureAnonymousUser, firebaseServices } from '../firebase/client';
 import { createReconnectToken, hashReconnectToken, saveReconnectToken } from './identity';
+import { hydrateRoom } from './hydrate';
 import { LEASE_DURATION_MS } from './coordinator';
 import { createGame, type PlayerSetup } from '../game/engine';
 
@@ -46,19 +47,20 @@ export const joinRoom = async (rawCode: string, displayName: string): Promise<Ro
   const token = createReconnectToken();
   const hash = await hashReconnectToken(token);
   const playerId = `player-${user.uid.slice(0, 10)}`;
-  const roomSnapshot = (await get(ref(services.database, `rooms/${code}`))).val() as Room | null;
+  const roomValue = (await get(ref(services.database, `rooms/${code}`))).val() as Room | null;
+  const roomSnapshot = roomValue ? hydrateRoom(roomValue) : null;
   if (!roomSnapshot || roomSnapshot.status !== 'LOBBY') throw new Error('La sala no existe o ya ha empezado.');
-  const transaction = await runTransaction(ref(services.database, `rooms/${code}/seats`), (seats: Room['seats'] | null) => {
-    const currentSeats = seats ?? {};
-    const used = Object.keys(currentSeats).map(Number);
-    if (used.length >= roomSnapshot.maxPlayers) return;
-    const number = Array.from({ length: roomSnapshot.maxPlayers }, (_, index) => index).find((seat) => !used.includes(seat));
-    if (number === undefined) return;
-    const now = Date.now();
-    return { ...currentSeats, [number]: { number, playerId, ownerUid: user.uid, reconnectHash: null, isBot: false, joinedAt: now } };
-  }, { applyLocally: false });
-  if (!transaction.committed) throw new Error('La sala ya está completa.');
-  const claimedSeat = Object.values(transaction.snapshot.val() as Room['seats']).find((seat) => seat.playerId === playerId)?.number;
+  let claimedSeat: number | undefined;
+  for (let number = 0; number < roomSnapshot.maxPlayers; number += 1) {
+    const transaction = await runTransaction(ref(services.database, `rooms/${code}/seats/${number}`), (seat: Seat | null) => {
+      if (seat !== null) return;
+      return { number, playerId, ownerUid: user.uid, reconnectHash: null, isBot: false, joinedAt: Date.now() } satisfies Seat;
+    }, { applyLocally: false });
+    if (transaction.committed) {
+      claimedSeat = number;
+      break;
+    }
+  }
   if (claimedSeat === undefined) throw new Error('No se pudo confirmar el asiento.');
   await set(ref(services.database, `rooms/${code}/players/${playerId}`), { uid: user.uid, playerId, displayName, connected: true, lastSeen: Date.now() } satisfies OnlinePlayer);
   await set(ref(services.database, `seatProofs/${code}/${claimedSeat}`), hash);
@@ -72,7 +74,8 @@ export const reconnectToRoom = async (rawCode: string, token: string): Promise<R
   const user = await ensureAnonymousUser();
   const services = firebaseServices()!;
   const hash = await hashReconnectToken(token);
-  const room = (await get(ref(services.database, `rooms/${code}`))).val() as Room | null;
+  const roomValue = (await get(ref(services.database, `rooms/${code}`))).val() as Room | null;
+  const room = roomValue ? hydrateRoom(roomValue) : null;
   if (!room || room.status === 'ENDED') throw new Error('La sala no existe o ya terminó.');
   const owned = Object.values(room.seats).find((seat) => seat.ownerUid === user.uid);
   if (!owned) {
@@ -99,7 +102,8 @@ export const processReconnectClaims = async (code: string, coordinatorUid: strin
     get(ref(services.database, `reconnectClaims/${code}`)),
     get(ref(services.database, `seatProofs/${code}`)),
   ]);
-  const room = roomSnapshot.val() as Room | null;
+  const roomValue = roomSnapshot.val() as Room | null;
+  const room = roomValue ? hydrateRoom(roomValue) : null;
   if (!room || room.coordinator.coordinatorId !== coordinatorUid) return;
   const claims = claimsSnapshot.val() as Record<string, { hash: string; requestedAt: number }> | null;
   const proofs = proofsSnapshot.val() as Record<string, string> | null;
@@ -121,7 +125,8 @@ export const processReconnectClaims = async (code: string, coordinatorUid: strin
 export const enqueueCommand = async (code: string, command: GameCommand, uid: string): Promise<void> => {
   const services = firebaseServices();
   if (!services) throw new Error('Firebase no está configurado.');
-  const room = (await get(ref(services.database, `rooms/${code}`))).val() as Room | null;
+  const roomValue = (await get(ref(services.database, `rooms/${code}`))).val() as Room | null;
+  const room = roomValue ? hydrateRoom(roomValue) : null;
   const seat = room && Object.values(room.seats).find((candidate) => candidate.playerId === command.playerId);
   if (!seat || seat.ownerUid !== uid) throw new Error('No eres propietario de este asiento.');
   await set(ref(services.database, `rooms/${code}/commands/${command.commandId}`), { command, submittedByUid: uid, submittedAt: Date.now() });
@@ -130,7 +135,8 @@ export const enqueueCommand = async (code: string, command: GameCommand, uid: st
 export const endOnlineRoom = async (code: string, uid: string): Promise<void> => {
   const services = firebaseServices();
   if (!services) throw new Error('Firebase no está configurado.');
-  const room = (await get(ref(services.database, `rooms/${code}`))).val() as Room | null;
+  const roomValue = (await get(ref(services.database, `rooms/${code}`))).val() as Room | null;
+  const room = roomValue ? hydrateRoom(roomValue) : null;
   if (!room || room.hostUid !== uid || room.coordinator.coordinatorId !== uid) throw new Error('Solo el host coordinador puede finalizar la partida.');
   await update(ref(services.database, `rooms/${code}`), { status: 'ENDED', endedAt: Date.now() });
 };
@@ -138,7 +144,8 @@ export const endOnlineRoom = async (code: string, uid: string): Promise<void> =>
 export const startOnlineGame = async (code: string, uid: string): Promise<void> => {
   const services = firebaseServices();
   if (!services) throw new Error('Firebase no está configurado.');
-  const result = await runTransaction(ref(services.database, `rooms/${code}`), (room: Room | null) => {
+  const result = await runTransaction(ref(services.database, `rooms/${code}`), (value: Room | null) => {
+    const room = value ? hydrateRoom(value) : null;
     if (!room || room.status !== 'LOBBY' || room.hostUid !== uid) return;
     const humanSeats = Object.values(room.seats).sort((a, b) => a.number - b.number);
     const nextSeats = { ...room.seats };
