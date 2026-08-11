@@ -50,17 +50,17 @@ export const joinRoom = async (rawCode: string, displayName: string): Promise<Ro
   const roomValue = (await get(ref(services.database, `rooms/${code}`))).val() as Room | null;
   const roomSnapshot = roomValue ? hydrateRoom(roomValue) : null;
   if (!roomSnapshot || roomSnapshot.status !== 'LOBBY') throw new Error('La sala no existe o ya ha empezado.');
-  const transaction = await runTransaction(ref(services.database, `rooms/${code}/seats`), (seats: Room['seats'] | null) => {
-    const currentSeats = seats ?? {};
-    const used = Object.keys(currentSeats).map(Number);
-    if (used.length >= roomSnapshot.maxPlayers) return;
-    const number = Array.from({ length: roomSnapshot.maxPlayers }, (_, index) => index).find((seat) => !used.includes(seat));
-    if (number === undefined) return;
-    const now = Date.now();
-    return { ...currentSeats, [number]: { number, playerId, ownerUid: user.uid, reconnectHash: null, isBot: false, joinedAt: now } };
-  }, { applyLocally: false });
-  if (!transaction.committed) throw new Error('La sala ya está completa.');
-  const claimedSeat = Object.values(transaction.snapshot.val() as Room['seats']).find((seat) => seat.playerId === playerId)?.number;
+  let claimedSeat: number | undefined;
+  for (let number = 0; number < roomSnapshot.maxPlayers; number += 1) {
+    const transaction = await runTransaction(ref(services.database, `rooms/${code}/seats/${number}`), (seat: Seat | null) => {
+      if (seat !== null) return;
+      return { number, playerId, ownerUid: user.uid, reconnectHash: null, isBot: false, joinedAt: Date.now() } satisfies Seat;
+    }, { applyLocally: false });
+    if (transaction.committed) {
+      claimedSeat = number;
+      break;
+    }
+  }
   if (claimedSeat === undefined) throw new Error('No se pudo confirmar el asiento.');
   await set(ref(services.database, `rooms/${code}/players/${playerId}`), { uid: user.uid, playerId, displayName, connected: true, lastSeen: Date.now() } satisfies OnlinePlayer);
   await set(ref(services.database, `seatProofs/${code}/${claimedSeat}`), hash);
