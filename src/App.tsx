@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { GameCommand, Room } from './types';
 import { useLocalGame } from './hooks/useLocalGame';
 import { useOnlineRoom } from './hooks/useOnlineRoom';
@@ -27,10 +27,13 @@ const OnlineSession = ({ identity, onExit }: { readonly identity: RoomIdentity; 
   const [error, setError] = useState<string | null>(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
   useOnlineDriver(identity.code, room, identity.uid);
+  const dispatch = useCallback((next: GameCommand): boolean => {
+    void enqueueCommand(identity.code, next, identity.uid).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'No se pudo enviar la acción.'));
+    return true;
+  }, [identity.code, identity.uid]);
   if (!room) return <main className="loading-screen"><div className="brand-mark">BANG!</div><p>Abriendo las puertas del saloon…</p></main>;
   if (room.status === 'LOBBY') return <OnlineLobby room={room} identity={identity} error={error} onExit={onExit} onStart={() => void startOnlineGame(room.code, identity.uid).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'No se pudo empezar.'))} />;
   if (room.status === 'ENDED' || !room.canonical) return <main className="loading-screen"><div className="brand-mark">PARTIDA FINALIZADA</div><button className="primary-action" onClick={onExit}>Volver</button></main>;
-  const dispatch = (next: GameCommand): boolean => { void enqueueCommand(room.code, next, identity.uid).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'No se pudo enviar la acción.')); return true; };
   const canEnd = room.hostUid === identity.uid && room.coordinator.coordinatorId === identity.uid;
   return <><GameBoard state={room.canonical} viewerId={identity.playerId} error={error} dispatch={dispatch} onExit={onExit} syncLabel={connection.connected ? 'ONLINE' : 'SIN CONEXIÓN'} />{canEnd && <button className="finish-online" onClick={() => setConfirmEnd(true)}>Finalizar partida online</button>}{confirmEnd && <div className="modal-backdrop"><section className="game-modal" role="dialog" aria-modal="true"><span className="eyebrow">FINALIZAR PARTIDA ONLINE</span><h2>¿Seguro que quieres finalizar la partida para todos?</h2><div className="modal-actions"><button onClick={() => setConfirmEnd(false)}>Cancelar</button><button className="danger-action" onClick={() => void endOnlineRoom(room.code, identity.uid).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'No se pudo finalizar.'))}>Sí, finalizar</button></div></section></div>}</>;
 };
