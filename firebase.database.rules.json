@@ -26,7 +26,7 @@
           ".validate": "newData.hasChildren(['coordinatorId','coordinatorEpoch','leaseUntil','heartbeat']) && newData.child('coordinatorEpoch').isNumber() && newData.child('leaseUntil').isNumber()"
         },
         "canonical": {
-          ".validate": "!newData.exists() || (newData.child('revision').isNumber() && newData.child('revision').val() >= data.child('revision').val())"
+          ".validate": "!newData.exists() || (newData.child('revision').isNumber() && (!data.exists() || newData.child('revision').val() >= data.child('revision').val()))"
         }
       }
     },
