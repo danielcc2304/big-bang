@@ -26,6 +26,7 @@ const oscillatorNode = () => ({
 
 describe('SoundService', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     localStorage.clear();
     audio.createGain.mockImplementation(gainNode);
     audio.createOscillator.mockImplementation(oscillatorNode);
@@ -63,7 +64,11 @@ describe('SoundService', () => {
     await service.startMusic();
 
     expect(audio.createOscillator.mock.calls.length).toBeGreaterThan(16);
+    expect(service.musicPlaying).toBe(true);
+    const musicGain = audio.createGain.mock.results[1]?.value as ReturnType<typeof gainNode>;
+    expect(musicGain.gain.value).toBeGreaterThan(0.4);
     service.stopMusic();
+    expect(service.musicPlaying).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
   });
 
