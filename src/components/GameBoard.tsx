@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Card, GameCommand, GameState, Player } from '../types';
 import { command } from '../game/engine';
 import { CARD_CATALOG } from '../game/cards/catalog';
@@ -18,6 +18,17 @@ interface GameBoardProps {
 
 const TARGET_CARDS = new Set(['BANG', 'PANIC', 'CAT_BALOU', 'DUEL', 'JAIL']);
 
+const soundForLog = (message: string): Parameters<typeof sound.play>[0] => {
+  if (message.includes('BANG!')) return 'bang';
+  if (message.includes('Almacén')) return 'store';
+  if (message.includes('roba ')) return 'draw';
+  if (message.includes('recupera una vida') || message.includes('Saloon')) return 'beer';
+  if (message.includes('Dinamita')) return 'dynamite';
+  if (message.includes('Prisión')) return 'jail';
+  if (message.includes('pone en juego')) return 'equip';
+  return 'select';
+};
+
 export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel = 'LOCAL' }: GameBoardProps) => {
   const viewer = state.players.find((player) => player.id === viewerId)!;
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
@@ -26,6 +37,9 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   const [keepCards, setKeepCards] = useState<readonly string[]>([]);
   const [debug, setDebug] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(sound.enabled);
+  const lastSoundLogId = useRef(state.logs.at(-1)?.id);
+  const previousTurnPlayerId = useRef(state.turn.currentPlayerId);
+  const previousWinner = useRef(state.winner);
   const selectedCard = viewer.hand.find((card) => card.id === selectedCardId);
   const topDiscard = state.discard.at(-1);
   const topDiscardDefinition = topDiscard ? CARD_CATALOG[topDiscard.name] : null;
@@ -34,6 +48,24 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
 
   useEffect(() => { setReactionCards([]); }, [state.reaction?.id]);
   useEffect(() => { if (state.turn.phase !== 'DISCARD') setKeepCards([]); }, [state.turn.phase]);
+  useEffect(() => {
+    const latest = state.logs.at(-1);
+    if (!latest || latest.id === lastSoundLogId.current) return;
+    lastSoundLogId.current = latest.id;
+    if (!latest.message.startsWith(`${viewer.name} `)) sound.play(soundForLog(latest.message));
+  }, [state.logs, viewer.name]);
+  useEffect(() => {
+    if (previousTurnPlayerId.current !== state.turn.currentPlayerId && state.turn.currentPlayerId === viewerId) sound.play('turn');
+    previousTurnPlayerId.current = state.turn.currentPlayerId;
+  }, [state.turn.currentPlayerId, viewerId]);
+  useEffect(() => {
+    if (!previousWinner.current && state.winner) {
+      const viewerWins = state.winner === 'LAW' ? viewer.role === 'SHERIFF' || viewer.role === 'DEPUTY' : state.winner === 'OUTLAWS' ? viewer.role === 'OUTLAW' : viewer.role === 'RENEGADE';
+      sound.play(viewerWins ? 'victory' : 'defeat');
+    }
+    previousWinner.current = state.winner;
+  }, [state.winner, viewer.role]);
+  useEffect(() => { if (error) sound.play('error'); }, [error]);
   useEffect(() => {
     if (state.turn.currentPlayerId === viewerId && state.turn.phase === 'TURN_START') dispatch(command(state, viewerId, 'RESOLVE_TURN_START', {}));
     else if (state.turn.currentPlayerId === viewerId && state.turn.phase === 'DRAW') dispatch(command(state, viewerId, 'DRAW_CARDS', {}));
@@ -77,7 +109,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   const status = state.winner ? 'Partida terminada' : state.reaction ? `${state.players.find((p) => p.id === state.reaction?.targetPlayerId)?.name ?? ''} debe responder` : state.storeState ? `Almacén: elige ${state.players.find((p) => p.id === state.storeState?.currentPlayerId)?.name ?? ''}` : `${state.players.find((p) => p.id === state.turn.currentPlayerId)?.name ?? ''} · ${state.turn.phase}`;
 
   return (
-    <main className="game-shell">
+    <main className="game-shell" onPointerDown={() => void sound.unlock()}>
       <header className="game-topbar">
         <button className="brand-button" onClick={onExit}><b>BANG!</b><span>SALOON ONLINE</span></button>
         <div className="sync-strip"><i className={`sync-dot ${syncLabel === 'LOCAL' ? 'local' : ''}`} /> {syncLabel} <span>r{state.revision}</span></div>

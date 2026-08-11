@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createGame } from '../game/engine';
+import { applyCommand, command, createGame } from '../game/engine';
+import { decideAiCommand, initialKnowledge } from '../game/ai';
+import { makeCard, patchPlayer, playPhase, run, testState } from '../test/helpers';
 import type { GameState, Room } from '../types';
 import { hydrateGameState, hydrateRoom } from './hydrate';
 
@@ -62,5 +64,23 @@ describe('Firebase state hydration', () => {
     expect(hydrated.commands).toEqual({});
     expect(hydrated.seats[0]?.reconnectHash).toBeNull();
     expect(hydrated.canonical?.discard).toEqual([]);
+  });
+
+  it('restores the empty Almacén picks removed by Firebase so online AI can continue', () => {
+    let game = playPhase(testState());
+    const store = makeCard('GENERAL_STORE', 'online-store');
+    game = patchPlayer(game, 'p0', { kind: 'AI', hand: [store] });
+    game = run(game, command(game, 'p0', 'PLAY_CARD', { cardId: store.id }));
+    const firebaseState = {
+      ...game,
+      storeState: { ...game.storeState!, pickedBy: undefined },
+    } as unknown as GameState;
+
+    const hydrated = hydrateGameState(firebaseState);
+    const aiCommand = decideAiCommand(hydrated, 'p0', initialKnowledge(hydrated, 'p0'));
+
+    expect(hydrated.storeState?.pickedBy).toEqual({});
+    expect(aiCommand?.type).toBe('STORE_PICK');
+    expect(applyCommand(hydrated, aiCommand!).ok).toBe(true);
   });
 });
