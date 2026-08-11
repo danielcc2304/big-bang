@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { makeCard, patchPlayer, playPhase, setRole, testState } from '../../test/helpers';
+import { makeCard, patchPlayer, playPhase, setCharacter, setRole, testState } from '../../test/helpers';
 import { decideAiCommand } from './decide';
 import { initialKnowledge } from './knowledge';
 
@@ -12,6 +12,17 @@ const fourPlayerRoles = () => {
 };
 
 describe('estrategia de objetivos de la IA', () => {
+  it('Pedro Ramírez toma la carta superior del descarte durante su robo', () => {
+    let state = fourPlayerRoles();
+    const discarded = makeCard('BEER', 'ai-pedro-discard');
+    state = { ...state, discard: [discarded], turn: { ...state.turn, currentPlayerId: 'p3', phase: 'DRAW' } };
+    state = setCharacter(state, 'p3', 'Pedro Ramirez');
+
+    const decision = decideAiCommand(state, 'p3', initialKnowledge(state, 'p3'));
+
+    expect(decision).toMatchObject({ type: 'DRAW_CARDS', payload: { firstCardSource: 'DISCARD' } });
+  });
+
   it('el Renegado evita atacar al Sheriff mientras haya más rivales', () => {
     let state = playPhase(fourPlayerRoles(), 'p3');
     const duel = makeCard('DUEL', 'renegade-balance-duel');

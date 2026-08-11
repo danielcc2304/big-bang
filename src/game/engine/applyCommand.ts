@@ -238,16 +238,30 @@ const handleCommand = (state: GameState, command: GameCommand): CommandResult =>
       return { ok: true, state: resolveTurnStart(state, player) };
     case 'DRAW_CARDS': {
       if (state.turn.currentPlayerId !== player.id || state.turn.phase !== 'DRAW') return fail(state, 'NOT_DRAW_PHASE', 'No puedes robar ahora.');
-      let count = command.payload.count ?? 2;
-      let draw = drawCards(state, count);
+      const firstCardSource = command.payload.firstCardSource ?? 'DECK';
+      if (firstCardSource !== 'DECK' && firstCardSource !== 'DISCARD') return fail(state, 'INVALID_DRAW_SOURCE', 'La procedencia del robo no es válida.');
+      if (firstCardSource === 'DISCARD' && player.character.name !== 'Pedro Ramirez') return fail(state, 'ABILITY_NOT_AVAILABLE', 'Solo Pedro Ramírez puede robar del descarte.');
+      if (firstCardSource === 'DISCARD' && state.discard.length === 0) return fail(state, 'EMPTY_DISCARD', 'No hay ninguna carta en el descarte.');
+      const discardedCard = firstCardSource === 'DISCARD' ? state.discard.at(-1) : undefined;
+      let draw = firstCardSource === 'DISCARD'
+        ? (() => {
+            const withoutDiscard = { ...state, discard: state.discard.slice(0, -1) };
+            const second = drawCards(withoutDiscard, 1);
+            return { state: second.state, cards: [discardedCard!, ...second.cards] };
+          })()
+        : drawCards(state, 2);
+      let count = draw.cards.length;
       if (player.character.name === 'Black Jack' && draw.cards[1] && isRed(draw.cards[1])) {
         const bonus = drawCards(draw.state, 1);
         draw = { state: bonus.state, cards: [...draw.cards, ...bonus.cards] };
-        count += 1;
+        count = draw.cards.length;
       }
       const current = playerById(draw.state, player.id)!;
       const next = replacePlayer(draw.state, { ...current, hand: [...current.hand, ...draw.cards] });
-      return { ok: true, state: log({ ...next, turn: { ...next.turn, phase: 'PLAY' } }, `${player.name} roba ${count} cartas.`) };
+      const message = firstCardSource === 'DISCARD'
+        ? `${player.name} roba la última carta del descarte y ${Math.max(0, count - 1)} del mazo.`
+        : `${player.name} roba ${count} cartas.`;
+      return { ok: true, state: log({ ...next, turn: { ...next.turn, phase: 'PLAY' } }, message) };
     }
     case 'END_TURN': {
       if (state.turn.currentPlayerId !== player.id || state.turn.phase !== 'PLAY') return fail(state, 'NOT_YOUR_TURN', 'No puedes terminar el turno ahora.');
