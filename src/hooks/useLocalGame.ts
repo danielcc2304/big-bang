@@ -10,7 +10,7 @@ export interface LocalGameController {
 }
 
 export const useLocalGame = (setups: readonly PlayerSetup[], seed: number): LocalGameController => {
-  const [state, setState] = useState(() => createGame(setups, seed));
+  const [state, setState] = useState(() => createGame(setups, seed, 'DRAFT_TWO'));
   const [error, setError] = useState<string | null>(null);
   const knowledge = useMemo(() => Object.fromEntries(setups.filter((setup) => setup.kind === 'AI').map((setup) => [setup.id, initialKnowledge(state, setup.id)])), [setups, state]);
 
