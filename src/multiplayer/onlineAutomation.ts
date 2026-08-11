@@ -1,4 +1,5 @@
 import type { GameState, Room } from '../types';
+import { serverNow } from '../firebase/clock';
 
 export const DISCONNECTED_TAKEOVER_MS = 12_000;
 
@@ -7,10 +8,17 @@ const canAutomate = (room: Room, playerId: string, now: number): boolean => {
   if (!player) return false;
   if (player.kind === 'AI') return true;
   const online = room.players[playerId];
-  return Boolean(online && !online.connected && now - online.lastSeen >= DISCONNECTED_TAKEOVER_MS);
+  if (!online) return false;
+  const presenceForPlayer = room.presence?.[playerId];
+  if (presenceForPlayer === undefined) return !online.connected && now - online.lastSeen >= DISCONNECTED_TAKEOVER_MS;
+  const connections = Object.values(presenceForPlayer).filter((connection) => connection.uid === online.uid);
+  const hasLiveConnection = connections.some((connection) => connection.connected && now - connection.lastSeen < DISCONNECTED_TAKEOVER_MS);
+  if (hasLiveConnection) return false;
+  const latestSeen = Math.max(online.lastSeen, ...connections.map((connection) => connection.lastSeen));
+  return now - latestSeen >= DISCONNECTED_TAKEOVER_MS;
 };
 
-export const automatedActorId = (room: Room, now = Date.now()): string | null => {
+export const automatedActorId = (room: Room, now = serverNow()): string | null => {
   const state = room.canonical;
   if (!state || state.winner) return null;
   if (state.reaction) return canAutomate(room, state.reaction.targetPlayerId, now) ? state.reaction.targetPlayerId : null;

@@ -13,6 +13,8 @@ describe('combate y personajes', () => {
     state = run(state, command(state, 'p1', 'REACTION', { cardIds: [missed.id] }));
     expect(state.players[1]!.lives).toBe(lives);
     expect(state.reaction).toBeNull();
+    expect(state.logs.at(-1)?.message).toContain('juega ¡Fallaste!');
+    expect(state.logs.at(-1)?.effect).toMatchObject({ kind: 'REACTION', success: true });
   });
 
   it('Slab the Killer exige dos Fallaste!', () => {
@@ -72,6 +74,7 @@ describe('combate y personajes', () => {
     state = run(state, command(state, 'p0', 'PLAY_CARD', { cardId: bang.id, targetPlayerId: 'p1' }));
     expect(state.reaction).toBeNull();
     expect(state.discard.some((card) => card.id === heart.id)).toBe(true);
+    expect(state.logs.some((entry) => entry.effect?.card.id === heart.id && entry.effect.success)).toBe(true);
   });
 
   it('Barril fallido descarta el juicio y deja pendiente un Fallaste!', () => {

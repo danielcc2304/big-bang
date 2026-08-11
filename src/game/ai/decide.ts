@@ -53,7 +53,8 @@ export const decideAiCommand = (state: GameState, playerId: string, knowledge: A
   if (state.turn.phase === 'DRAW') return command(state, actor.id, 'DRAW_CARDS', { firstCardSource: actor.character.name === 'Pedro Ramirez' && state.discard.length > 0 ? 'DISCARD' : 'DECK' });
   if (state.turn.phase === 'DISCARD') {
     const keepValue: Partial<Record<Card['name'], number>> = { MISSED: 10, BEER: 9, BANG: 8, VOLCANIC: 7, WINCHESTER: 7 };
-    const discards = [...actor.hand].sort((a, b) => (keepValue[a.name] ?? 3) - (keepValue[b.name] ?? 3)).slice(0, state.turn.pendingDiscardCount);
+    const currentExcess = Math.max(0, actor.hand.length - actor.lives);
+    const discards = [...actor.hand].sort((a, b) => (keepValue[a.name] ?? 3) - (keepValue[b.name] ?? 3)).slice(0, currentExcess);
     return command(state, actor.id, 'DISCARD_CARDS', { cardIds: discards.map((card) => card.id) });
   }
   if (state.turn.phase !== 'PLAY') return null;

@@ -12,6 +12,19 @@ const setups = Array.from({ length: 4 }, (_, index) => ({
 }));
 
 describe('Firebase state hydration', () => {
+  it('conserva los efectos públicos de desenfunde al viajar por Firebase', () => {
+    const game = createGame(setups, 41);
+    const card = game.deck[0]!;
+    const withEffect = {
+      ...game,
+      logs: [...game.logs, { id: 'judgement-online', revision: 1, message: 'El Barril salva al jugador.', tone: 'ACTION' as const, effect: { kind: 'JUDGEMENT' as const, playerId: 'human', card, success: true, headline: '¡SE SALVA!' } }],
+    };
+
+    const hydrated = hydrateGameState(JSON.parse(JSON.stringify(withEffect)) as GameState);
+
+    expect(hydrated.logs.at(-1)?.effect).toEqual(withEffect.logs.at(-1)?.effect);
+  });
+
   it('restores values omitted by Realtime Database from a fresh game', () => {
     const game = createGame(setups, 42);
     const firebaseState = {

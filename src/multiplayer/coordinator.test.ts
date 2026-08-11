@@ -38,6 +38,7 @@ describe('coordinador online', () => {
     await expect(applyAuthoritativeCommand('ABC123', stale, 'host', 2, 100)).resolves.toBe(true);
     expect(updated?.canonical?.revision).toBe(canonical.revision);
     expect(updated?.commands).toEqual({});
+    expect(updated?.commandReceipts?.[stale.commandId]?.status).toBe('REJECTED');
   });
 
   it('rebasa elecciones simultáneas sobre la revisión canónica actual', async () => {
@@ -109,5 +110,22 @@ describe('coordinador online', () => {
     expect(updated?.canonical?.players[1]!.lives).toBe(livesBefore - 1);
     expect(updated?.canonical?.reaction).toBeNull();
     expect(updated?.commands).toEqual({});
+  });
+
+  it('confirma un comando aplicado para que el cliente pueda cerrar su estado pendiente', async () => {
+    const canonical = createGame(Array.from({ length: 4 }, (_, index) => ({ id: `p${index}`, name: `P${index}`, kind: 'HUMAN' as const })), 45);
+    const next = command(canonical, canonical.turn.currentPlayerId, 'RESOLVE_TURN_START', {});
+    const room = {
+      code: 'ABC123', status: 'PLAYING', createdAt: 1, hostUid: 'host', maxPlayers: 4, characterMode: 'OFFICIAL', seats: {}, players: {}, canonical, commands: { queued: { command: next, submittedByUid: 'guest', submittedAt: 1 } },
+      coordinator: { coordinatorId: 'host', coordinatorEpoch: 2, leaseUntil: 10_000, heartbeat: 1 },
+    } satisfies Room;
+    let updated: Room | undefined;
+    databaseMocks.runTransaction.mockImplementation((_path: string, updater: (value: Room) => Room) => {
+      updated = updater(room);
+      return Promise.resolve({ committed: updated !== undefined, snapshot: { val: () => updated } });
+    });
+
+    await expect(applyAuthoritativeCommand('ABC123', next, 'host', 2, 100)).resolves.toBe(true);
+    expect(updated?.commandReceipts?.[next.commandId]).toMatchObject({ status: 'APPLIED', submittedByUid: 'guest', revision: canonical.revision + 1 });
   });
 });
