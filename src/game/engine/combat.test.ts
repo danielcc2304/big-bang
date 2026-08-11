@@ -74,6 +74,72 @@ describe('combate y personajes', () => {
     expect(state.discard.some((card) => card.id === heart.id)).toBe(true);
   });
 
+  it('Barril fallido descarta el juicio y deja pendiente un Fallaste!', () => {
+    let state = playPhase(testState());
+    const bang = makeCard('BANG', 'barrel-failed-bang'); const barrel = makeCard('BARREL', 'barrel-failed'); const club = makeCard('BEER', 'barrel-club', 'CLUBS');
+    state = { ...state, deck: [club, ...state.deck] };
+    state = patchPlayer(state, 'p0', { hand: [bang] }); state = patchPlayer(state, 'p1', { equipment: { ...state.players[1]!.equipment, barrel } });
+    state = run(state, command(state, 'p0', 'PLAY_CARD', { cardId: bang.id, targetPlayerId: 'p1' }));
+    expect(state.reaction?.requiredCards).toBe(1);
+    expect(state.discard.some((card) => card.id === club.id)).toBe(true);
+  });
+
+  it('Jourdonnais y Barril dejan de revelar al cancelar un BANG! normal', () => {
+    let state = setCharacter(playPhase(testState()), 'p1', 'Jourdonnais');
+    const bang = makeCard('BANG', 'jourdonnais-bang'); const barrel = makeCard('BARREL', 'jourdonnais-barrel');
+    const heart = makeCard('BEER', 'jourdonnais-heart', 'HEARTS'); const untouched = makeCard('BEER', 'jourdonnais-untouched', 'CLUBS');
+    state = { ...state, deck: [heart, untouched, ...state.deck] };
+    state = patchPlayer(state, 'p0', { hand: [bang] }); state = patchPlayer(state, 'p1', { equipment: { ...state.players[1]!.equipment, barrel } });
+    state = run(state, command(state, 'p0', 'PLAY_CARD', { cardId: bang.id, targetPlayerId: 'p1' }));
+    expect(state.reaction).toBeNull();
+    expect(state.deck[0]?.id).toBe(untouched.id);
+    expect(state.discard.some((card) => card.id === heart.id)).toBe(true);
+  });
+
+  it('Jourdonnais y Barril usan la segunda oportunidad si la primera falla', () => {
+    let state = setCharacter(playPhase(testState()), 'p1', 'Jourdonnais');
+    const bang = makeCard('BANG', 'jourdonnais-retry-bang'); const barrel = makeCard('BARREL', 'jourdonnais-retry-barrel');
+    const club = makeCard('BEER', 'jourdonnais-retry-club', 'CLUBS'); const heart = makeCard('BEER', 'jourdonnais-retry-heart', 'HEARTS');
+    state = { ...state, deck: [club, heart, ...state.deck] };
+    state = patchPlayer(state, 'p0', { hand: [bang] }); state = patchPlayer(state, 'p1', { equipment: { ...state.players[1]!.equipment, barrel } });
+    state = run(state, command(state, 'p0', 'PLAY_CARD', { cardId: bang.id, targetPlayerId: 'p1' }));
+    expect(state.reaction).toBeNull();
+    expect(state.discard.some((card) => card.id === club.id)).toBe(true);
+    expect(state.discard.some((card) => card.id === heart.id)).toBe(true);
+  });
+
+  it('un éxito de Barril frente a Slab the Killer aún exige un Fallaste!', () => {
+    let state = setCharacter(playPhase(testState()), 'p0', 'Slab the Killer');
+    const bang = makeCard('BANG', 'slab-single-barrel-bang'); const barrel = makeCard('BARREL', 'slab-single-barrel'); const heart = makeCard('BEER', 'slab-single-heart', 'HEARTS');
+    state = { ...state, deck: [heart, ...state.deck] };
+    state = patchPlayer(state, 'p0', { hand: [bang] }); state = patchPlayer(state, 'p1', { equipment: { ...state.players[1]!.equipment, barrel } });
+    state = run(state, command(state, 'p0', 'PLAY_CARD', { cardId: bang.id, targetPlayerId: 'p1' }));
+    expect(state.reaction?.requiredCards).toBe(1);
+  });
+
+  it('Jourdonnais y Barril pueden reunir dos éxitos contra Slab the Killer', () => {
+    let state = setCharacter(playPhase(testState()), 'p0', 'Slab the Killer');
+    state = setCharacter(state, 'p1', 'Jourdonnais');
+    const bang = makeCard('BANG', 'slab-barrel-bang'); const barrel = makeCard('BARREL', 'slab-barrel');
+    const firstHeart = makeCard('BEER', 'slab-heart-1', 'HEARTS'); const secondHeart = makeCard('BEER', 'slab-heart-2', 'HEARTS');
+    state = { ...state, deck: [firstHeart, secondHeart, ...state.deck] };
+    state = patchPlayer(state, 'p0', { hand: [bang] }); state = patchPlayer(state, 'p1', { equipment: { ...state.players[1]!.equipment, barrel } });
+    state = run(state, command(state, 'p0', 'PLAY_CARD', { cardId: bang.id, targetPlayerId: 'p1' }));
+    expect(state.reaction).toBeNull();
+    expect(state.discard.some((card) => card.id === firstHeart.id)).toBe(true);
+    expect(state.discard.some((card) => card.id === secondHeart.id)).toBe(true);
+  });
+
+  it.each(['DUEL', 'GATLING'] as const)('Barril no protege frente a %s ni consume un juicio', (name) => {
+    let state = playPhase(testState());
+    const action = makeCard(name, `barrel-${name.toLowerCase()}`); const barrel = makeCard('BARREL', `barrel-vs-${name.toLowerCase()}`); const top = makeCard('BEER', `top-vs-${name.toLowerCase()}`, 'HEARTS');
+    state = { ...state, deck: [top, ...state.deck] };
+    state = patchPlayer(state, 'p0', { hand: [action] }); state = patchPlayer(state, 'p1', { equipment: { ...state.players[1]!.equipment, barrel } });
+    state = run(state, command(state, 'p0', 'PLAY_CARD', { cardId: action.id, ...(name === 'DUEL' ? { targetPlayerId: 'p1' } : {}) }));
+    expect(state.reaction?.type).toBe(name);
+    expect(state.deck[0]?.id).toBe(top.id);
+  });
+
   it('Duelo alterna BANG! hasta que alguien falla', () => {
     let state = playPhase(testState());
     const duel = makeCard('DUEL', 'duel'); const response = makeCard('BANG', 'response');
