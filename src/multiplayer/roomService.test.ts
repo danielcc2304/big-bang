@@ -35,7 +35,7 @@ vi.mock('./identity', () => ({
   loadReconnectToken: vi.fn(() => 'stored-token'),
 }));
 
-import { enqueueCommand, joinRoom, markPresenceOffline, refreshPresence } from './roomService';
+import { createRoom, enqueueCommand, joinRoom, markPresenceOffline, refreshPresence } from './roomService';
 
 describe('joinRoom', () => {
   beforeEach(() => {
@@ -126,6 +126,20 @@ describe('joinRoom', () => {
 
     expect(identity.playerId).toBe('player-tablet-use');
     expect(databaseMocks.runTransaction).not.toHaveBeenCalled();
+  });
+
+  it('usa una escritura protegida como compatibilidad si el servidor rechaza el preflight de la transacción', async () => {
+    databaseMocks.runTransaction.mockRejectedValueOnce(Object.assign(new Error('permission_denied'), { code: 'PERMISSION_DENIED' }));
+
+    const identity = await createRoom('Host', 4, 'DRAFT_TWO');
+
+    expect(identity.playerId).toBe('player-tablet-use');
+    expect(databaseMocks.set).toHaveBeenCalledWith(
+      expect.stringMatching(/^rooms\/[A-Z0-9]{6}$/),
+      expect.objectContaining({ status: 'LOBBY', hostUid: 'tablet-user-1234567890' }),
+    );
+    expect(databaseMocks.set).toHaveBeenCalledWith(expect.stringMatching(/^seatProofs\/[A-Z0-9]{6}\/0$/), 'a'.repeat(64));
+    expect(databaseMocks.onDisconnectSet).toHaveBeenCalled();
   });
 
   it('normaliza el reloj del cliente y coloca cada comando en una ranura transaccional', async () => {
