@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
+import { runTransaction } from 'firebase/database';
 
 const rules = await readFile(new URL('../firebase.database.rules.json', import.meta.url), 'utf8');
 const env = await initializeTestEnvironment({
@@ -24,6 +25,7 @@ const room = {
   coordinator: { coordinatorId: 'host', coordinatorEpoch: 1, leaseUntil: now + 12_000, heartbeat: now },
   commands: {},
 };
+const emptyRoom = { ...room, code: 'EMPTY1' };
 
 try {
   const host = env.authenticatedContext('host').database();
@@ -31,9 +33,16 @@ try {
   const stranger = env.authenticatedContext('stranger').database();
   const recoverer = env.authenticatedContext('recoverer').database();
 
-  // createRoom reserves a fresh code with a transaction, whose preflight read
-  // must be allowed while the room path is still empty.
-  await assertSucceeds(host.ref('rooms/EMPTY1').get());
+  // Exercise the same transaction used by createRoom, including its null
+  // preflight read, rather than only testing a direct set/get sequence.
+  const reservation = await runTransaction(host.ref('rooms/EMPTY1'), (current) => current === null ? emptyRoom : undefined, { applyLocally: false });
+  if (!reservation.committed) throw new Error('Fresh room transaction was not committed');
+  await assertSucceeds(host.ref('seatProofs/EMPTY1/0').set('c'.repeat(64)));
+  const emptyDisconnect = host.ref('rooms/EMPTY1/presence/player-host/connection').onDisconnect();
+  await assertSucceeds(emptyDisconnect.set({ uid: 'host', connected: false, connectedAt: now, lastSeen: { '.sv': 'timestamp' } }));
+  await emptyDisconnect.cancel();
+  await assertSucceeds(host.ref('rooms/EMPTY1/presence/player-host/connection').set({ uid: 'host', connected: true, connectedAt: now, lastSeen: now }));
+  await assertSucceeds(host.ref('rooms/EMPTY1/players/player-host').update({ connected: true, lastSeen: now }));
   await assertSucceeds(host.ref('rooms/ABC123').set(room));
   await assertSucceeds(host.ref('seatProofs/ABC123/0').set('a'.repeat(64)));
   await assertFails(recoverer.ref('reconnectClaims/ABC123/recoverer').set({ hash: 'b'.repeat(64), requestedAt: Date.now() }));
