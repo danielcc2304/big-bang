@@ -12,6 +12,13 @@ export const hashReconnectToken = async (token: string): Promise<string> => {
 
 const storageKey = (roomCode: string): string => `bang:reconnect:${roomCode}`;
 
-export const saveReconnectToken = (roomCode: string, token: string): void => localStorage.setItem(storageKey(roomCode), token);
-export const loadReconnectToken = (roomCode: string): string | null => localStorage.getItem(storageKey(roomCode));
-export const clearReconnectToken = (roomCode: string): void => localStorage.removeItem(storageKey(roomCode));
+export const saveReconnectToken = (roomCode: string, token: string): void => {
+  try { localStorage.setItem(storageKey(roomCode), token); } catch { /* private mode or storage quota */ }
+};
+export const loadReconnectToken = (roomCode: string): string | null => {
+  try { return localStorage.getItem(storageKey(roomCode)); } catch { return null; }
+};
+export const clearReconnectToken = (roomCode: string): void => {
+  try { localStorage.removeItem(storageKey(roomCode)); } catch { /* private mode or storage quota */ }
+};
+

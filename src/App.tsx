@@ -13,6 +13,14 @@ import wantedFriend from './assets/wanted-friend.jpg';
 
 interface LocalConfig { readonly name: string; readonly count: 4 | 5 | 6 | 7; readonly seed: number }
 
+const loadSavedName = (): string => {
+  try { return localStorage.getItem('bang:name') ?? 'Pistolero'; } catch { return 'Pistolero'; }
+};
+
+const saveName = (name: string): void => {
+  try { localStorage.setItem('bang:name', name); } catch { /* storage can be disabled in private mode */ }
+};
+
 const LocalSession = ({ config, onExit }: { readonly config: LocalConfig; readonly onExit: () => void }) => {
   const setups = useMemo(() => Array.from({ length: config.count }, (_, index) => ({ id: index === 0 ? 'you' : `bot-${index}`, name: index === 0 ? config.name : ['Coyote', 'Maverick', 'Sombra', 'Ruby', 'Doc', 'Rattler'][index - 1]!, kind: index === 0 ? 'HUMAN' as const : 'AI' as const })), [config]);
   const game = useLocalGame(setups, config.seed);
@@ -30,22 +38,47 @@ const OnlineSession = ({ identity, onExit }: { readonly identity: RoomIdentity; 
   const [error, setError] = useState<string | null>(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const lastReceiptId = useRef<string | null>(null);
+  const pendingCommands = useRef(new Map<string, { readonly playerId: string; readonly timer: number }>());
   useOnlineDriver(identity.code, room, identity.uid);
   const visibleError = error ?? connection.errors.at(-1) ?? null;
   useEffect(() => {
-    const receipt = Object.values(room?.commandReceipts ?? {})
+    const receipts = Object.values(room?.commandReceipts ?? {})
       .filter((candidate) => candidate.submittedByUid === identity.uid)
-      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+      .sort((left, right) => right.updatedAt - left.updatedAt);
+    for (const receipt of receipts) {
+      const pending = pendingCommands.current.get(receipt.commandId);
+      if (pending) {
+        window.clearTimeout(pending.timer);
+        pendingCommands.current.delete(receipt.commandId);
+      }
+    }
+    const receipt = receipts[0];
     if (!receipt || receipt.commandId === lastReceiptId.current) return;
     lastReceiptId.current = receipt.commandId;
     setError(receipt.status === 'REJECTED' ? receipt.error ?? 'La acción fue rechazada por la sala.' : null);
   }, [identity.uid, room?.commandReceipts]);
+  useEffect(() => () => {
+    for (const pending of pendingCommands.current.values()) window.clearTimeout(pending.timer);
+    pendingCommands.current.clear();
+  }, []);
   const dispatch = useCallback((next: GameCommand): boolean => {
     if (!connection.connected) {
       setError('Sin conexión con la sala. Espera a que vuelva la conexión antes de enviar la acción.');
       return false;
     }
-    void enqueueCommand(identity.code, next, identity.uid).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'No se pudo enviar la acción.'));
+    if (pendingCommands.current.has(next.commandId) || [...pendingCommands.current.values()].some((pending) => pending.playerId === next.playerId)) return false;
+    const timeout = window.setTimeout(() => {
+      if (!pendingCommands.current.delete(next.commandId)) return;
+      setError('La sala no confirmó la acción. Puedes volver a intentarlo.');
+    }, 20_000);
+    pendingCommands.current.set(next.commandId, { playerId: next.playerId, timer: timeout });
+    setError(null);
+    void enqueueCommand(identity.code, next, identity.uid).catch((cause: unknown) => {
+      const pending = pendingCommands.current.get(next.commandId);
+      if (pending) window.clearTimeout(pending.timer);
+      pendingCommands.current.delete(next.commandId);
+      setError(cause instanceof Error ? cause.message : 'No se pudo enviar la acción.');
+    });
     return true;
   }, [connection.connected, identity.code, identity.uid]);
   if (!room) return <main className="loading-screen"><div className="brand-mark">BANG!</div><p>{visibleError ?? (connection.lastUpdateAt ? 'La sala ya no está disponible.' : 'Abriendo las puertas del saloon…')}</p>{connection.lastUpdateAt ? <div className="modal-actions"><button className="primary-action" onClick={retry}>Reintentar</button><button onClick={onExit}>Volver</button></div> : null}</main>;
@@ -59,7 +92,7 @@ const OnlineSession = ({ identity, onExit }: { readonly identity: RoomIdentity; 
 export default function App() {
   const [localConfig, setLocalConfig] = useState<LocalConfig | null>(null);
   const [identity, setIdentity] = useState<RoomIdentity | null>(null);
-  const [name, setName] = useState(() => localStorage.getItem('bang:name') ?? 'Pistolero');
+  const [name, setName] = useState(loadSavedName);
   const [count, setCount] = useState<4 | 5 | 6 | 7>(4);
   const [characterMode, setCharacterMode] = useState<CharacterMode>('DRAFT_TWO');
   const [code, setCode] = useState(() => new URLSearchParams(location.search).get('room') ?? '');
@@ -88,7 +121,7 @@ export default function App() {
   }, [onHome]);
   if (localConfig) return <LocalSession config={localConfig} onExit={() => setLocalConfig(null)} />;
   if (identity) return <OnlineSession identity={identity} onExit={() => setIdentity(null)} />;
-  const remember = (): void => localStorage.setItem('bang:name', name);
+  const remember = (): void => saveName(name);
   const runOnline = (work: Promise<RoomIdentity>): void => { setOnlineError(null); void work.then((next) => { remember(); sound.play('connect'); setIdentity(next); }).catch((cause: unknown) => { sound.play('error'); setOnlineError(cause instanceof Error ? cause.message : 'No se pudo conectar.'); }); };
   const recover = (): void => { const token = recovery || loadReconnectToken(code); if (!token) { setOnlineError('Introduce la clave de recuperación de ese asiento.'); return; } runOnline(reconnectToRoom(code, token)); };
   const toggleMusic = (): void => {
@@ -117,3 +150,4 @@ export default function App() {
     </main>
   );
 }
+

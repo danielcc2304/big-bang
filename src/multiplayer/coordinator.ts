@@ -11,10 +11,15 @@ const MAX_RECEIPTS = 200;
 export const leaseIsValid = (lease: CoordinatorLease, now = serverNow()): boolean => lease.leaseUntil > now;
 
 export const electCoordinator = (current: CoordinatorLease | null, candidateId: string, now: number): CoordinatorLease | null => {
-  if (current && current.leaseUntil > now && current.coordinatorId !== candidateId) return null;
+  const currentIsActive = current !== null && current.leaseUntil > now;
+  if (currentIsActive && current.coordinatorId !== candidateId) return null;
+  // A lease reacquired after expiry must advance the epoch even when the same
+  // browser wins again. Otherwise an in-flight transaction from the previous
+  // lease could become valid again after the pause and mutate the room.
+  const keepsActiveLease = currentIsActive && current?.coordinatorId === candidateId;
   return {
     coordinatorId: candidateId,
-    coordinatorEpoch: (current?.coordinatorEpoch ?? 0) + (current?.coordinatorId === candidateId ? 0 : 1),
+    coordinatorEpoch: (current?.coordinatorEpoch ?? 0) + (keepsActiveLease ? 0 : 1),
     leaseUntil: now + LEASE_DURATION_MS,
     heartbeat: now,
   };
@@ -128,9 +133,17 @@ export const removeMalformedCommand = async (roomCode: string, commandId: string
     const now = serverNow();
     if (!room?.canonical || room.status === 'ENDED' || room.coordinator.coordinatorId !== uid || room.coordinator.coordinatorEpoch !== epoch || room.coordinator.leaseUntil <= now) return;
     const safeRoom = { ...room, commands: sanitizedCommands(room) };
-    const envelope = Object.values(safeRoom.commands ?? {}).find((candidate) => candidate?.command?.commandId === commandId);
-    const receipt: CommandReceipt | null = envelope ? { commandId, submittedByUid: envelope.submittedByUid, status: 'REJECTED', updatedAt: now, error: 'La acción recibida estaba corrupta.' } : null;
+    const entry = Object.entries(room.commands ?? {}).find(([key, candidate]) => key === commandId || candidate?.command?.commandId === commandId);
+    const envelope = entry?.[1];
+    const receipt: CommandReceipt | null = envelope ? {
+      commandId: typeof envelope.command?.commandId === 'string' ? envelope.command.commandId : commandId,
+      submittedByUid: typeof envelope.submittedByUid === 'string' ? envelope.submittedByUid : uid,
+      status: 'REJECTED',
+      updatedAt: now,
+      error: 'La acción recibida estaba corrupta.',
+    } : null;
     return withReceipt({ ...safeRoom, commands: removeCommand(safeRoom, commandId) }, receipt);
   }, { applyLocally: false });
   return result.committed;
 };
+

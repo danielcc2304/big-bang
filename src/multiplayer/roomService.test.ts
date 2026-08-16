@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { command, createGame } from '../game/engine';
+import type { CommandEnvelope } from '../types';
 
 const databaseMocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -33,7 +35,7 @@ vi.mock('./identity', () => ({
   loadReconnectToken: vi.fn(() => 'stored-token'),
 }));
 
-import { joinRoom } from './roomService';
+import { enqueueCommand, joinRoom, markPresenceOffline, refreshPresence } from './roomService';
 
 describe('joinRoom', () => {
   beforeEach(() => {
@@ -125,4 +127,40 @@ describe('joinRoom', () => {
     expect(identity.playerId).toBe('player-tablet-use');
     expect(databaseMocks.runTransaction).not.toHaveBeenCalled();
   });
+
+  it('normaliza el reloj del cliente y coloca cada comando en una ranura transaccional', async () => {
+    const setups = Array.from({ length: 4 }, (_, index) => ({ id: `p${index}`, name: `P${index}`, kind: 'HUMAN' as const }));
+    const canonical = createGame(setups, 99);
+    const room = {
+      code: 'ABC123', status: 'PLAYING', createdAt: 1, hostUid: 'uid-p0', maxPlayers: 4, characterMode: 'OFFICIAL',
+      seats: Object.fromEntries(setups.map((setup, index) => [index, { number: index, playerId: setup.id, ownerUid: `uid-${setup.id}`, reconnectHash: null, isBot: false, joinedAt: 1 }])),
+      players: Object.fromEntries(setups.map((setup) => [setup.id, { uid: `uid-${setup.id}`, playerId: setup.id, displayName: setup.name, connected: true, lastSeen: 1 }])),
+      canonical, commands: {}, commandReceipts: {}, coordinator: { coordinatorId: 'uid-p0', coordinatorEpoch: 1, leaseUntil: Date.now() + 10_000, heartbeat: Date.now() },
+    };
+    databaseMocks.get.mockResolvedValue({ val: () => room });
+    const next = command(canonical, 'p0', 'RESOLVE_TURN_START', {});
+    let captured: CommandEnvelope | undefined;
+    databaseMocks.runTransaction.mockImplementation((_path: string, updater: (current: null) => unknown) => {
+      captured = updater(null) as CommandEnvelope;
+      return Promise.resolve({ committed: true, snapshot: { val: () => captured } });
+    });
+
+    await enqueueCommand('ABC123', { ...next, createdAt: 0 }, 'uid-p0');
+
+    expect(captured?.command.commandId).toBe(next.commandId);
+    expect(captured?.command.createdAt).toBe(captured?.submittedAt);
+    expect(captured?.command.createdAt).toBeGreaterThan(0);
+    expect(databaseMocks.runTransaction).toHaveBeenCalledWith(expect.stringMatching(/^rooms\/ABC123\/commands\/slot-\d+$/), expect.any(Function), { applyLocally: false });
+  });
+
+  it('rearma la presencia y marca la conexión como offline al abandonar la sala', async () => {
+    await refreshPresence('ABC123', 'p0', 'uid-p0', 'connection-1');
+    await markPresenceOffline('ABC123', 'p0', 'uid-p0', 'connection-1');
+
+    expect(databaseMocks.onDisconnectSet).toHaveBeenCalledWith(expect.objectContaining({ uid: 'uid-p0', connected: false, lastSeen: 1234 }));
+    expect(databaseMocks.set).toHaveBeenNthCalledWith(1, 'rooms/ABC123/presence/p0/connection-1', expect.objectContaining({ uid: 'uid-p0', connected: true, lastSeen: 1234 }));
+    expect(databaseMocks.update).toHaveBeenNthCalledWith(1, 'rooms/ABC123/players/p0', expect.objectContaining({ uid: 'uid-p0', connected: true, lastSeen: 1234 }));
+    expect(databaseMocks.update).toHaveBeenNthCalledWith(2, 'rooms/ABC123/presence/p0/connection-1', expect.objectContaining({ uid: 'uid-p0', connected: false, lastSeen: 1234 }));
+  });
 });
+
