@@ -89,6 +89,24 @@ describe('GameBoard', () => {
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'DRAW_CARDS', payload: { firstCardSource: 'DISCARD' } }));
   });
 
+  it('permite a Kit Carlson elegir dos de las tres cartas reveladas', () => {
+    const base = createGame(setups, 39);
+    const options = base.deck.slice(0, 3);
+    const state = {
+      ...base,
+      deck: base.deck,
+      players: base.players.map((player) => player.id === setups[0]!.id ? { ...player, character: characterByName('Kit Carlson'), hand: [] } : player),
+      turn: { ...base.turn, currentPlayerId: setups[0]!.id, phase: 'DRAW' as const },
+    };
+    const dispatch = vi.fn(() => true);
+
+    render(<GameBoard state={state} viewerId={setups[0]!.id} error={null} dispatch={dispatch} onExit={() => undefined} syncLabel="ONLINE" />);
+    for (const card of options.slice(0, 2)) fireEvent.click(screen.getByRole('button', { name: new RegExp(`${CARD_CATALOG[card.name].label}, ${card.rank}`) }));
+    fireEvent.click(screen.getByRole('button', { name: 'Robar las seleccionadas' }));
+
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'DRAW_CARDS', payload: { drawCardIds: [options[0]!.id, options[1]!.id] } }));
+  });
+
   it('permite elegir qué equipo elimina La Ingenua Explosiva', () => {
     const base = createGame(setups, 41);
     const cat = base.deck.find((card) => card.name === 'CAT_BALOU')!;
