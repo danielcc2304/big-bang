@@ -1,5 +1,6 @@
 import type { Card, Equipment, GameState, Player } from '../../types';
 import { determineWinner } from '../rules/victory';
+import { seededRandom } from '../../utils/random';
 
 export const replacePlayer = (state: GameState, nextPlayer: Player): GameState => ({
   ...state,
@@ -23,6 +24,26 @@ export const drawCards = (state: GameState, count: number): { readonly state: Ga
   return { state: { ...state, deck, discard }, cards };
 };
 
+/**
+ * Peeks at the next cards without changing the state. The top of the discard
+ * pile is the last item in the array, just as it is when the discard is
+ * recycled into the deck.
+ */
+export const peekCards = (state: GameState, count: number): readonly Card[] => {
+  let deck = [...state.deck];
+  let discard = [...state.discard];
+  const cards: Card[] = [];
+  for (let index = 0; index < count; index += 1) {
+    if (deck.length === 0) {
+      deck = discard.reverse();
+      discard = [];
+    }
+    const card = deck.shift();
+    if (card) cards.push(card);
+  }
+  return cards;
+};
+
 export const allEquipmentCards = (equipment: Equipment): readonly Card[] => [
   equipment.weapon, equipment.barrel, equipment.mustang, equipment.scope, equipment.jail, equipment.dynamite,
 ].filter((card): card is Card => card !== null);
@@ -35,6 +56,8 @@ const checkSuzy = (state: GameState, playerId: string): GameState => {
   const draw = drawCards(state, 1);
   return replacePlayer(draw.state, { ...player, hand: draw.cards });
 };
+
+export const refillSuzyIfNeeded = (state: GameState, playerId: string): GameState => checkSuzy(state, playerId);
 
 export const healPlayer = (state: GameState, playerId: string, amount: number): GameState => {
   const player = playerById(state, playerId);
@@ -77,8 +100,15 @@ export const damagePlayer = (state: GameState, victimId: string, amount: number,
     const attacker = playerById(next, attackerId);
     const gringo = playerById(next, victimId);
     if (attacker && gringo) {
-      const stolen = attacker.hand.slice(0, amount);
-      next = replacePlayer(next, { ...attacker, hand: attacker.hand.slice(stolen.length) });
+      const random = seededRandom(next.seed ^ Math.imul(next.revision + 1, 0x9E3779B1) ^ attacker.seat ^ gringo.seat);
+      const stolen: Card[] = [];
+      const remaining = [...attacker.hand];
+      for (let index = 0; index < amount && remaining.length > 0; index += 1) {
+        const position = Math.floor(random.next() * remaining.length);
+        const [card] = remaining.splice(position, 1);
+        if (card) stolen.push(card);
+      }
+      next = replacePlayer(next, { ...attacker, hand: remaining });
       next = replacePlayer(next, { ...gringo, hand: [...gringo.hand, ...stolen] });
     }
   }

@@ -9,6 +9,14 @@ export const APP_VERSION = packageMetadata.version;
 
 export const RELEASE_NOTES: readonly ReleaseNotes[] = [
   {
+    version: '1.1.2',
+    changes: [
+      'Kit Carlson y Jesse Jones ya permiten elegir el robo correctamente; las habilidades de Lucky Duke, Suzy Lafayette, El Gringo y Sid Ketchum quedan cubiertas por el motor.',
+      'La IA usa objetivos por equipo y sospechas públicas, evita el túnel permanente al Sheriff y mantiene partidas competitivas sin leer roles secretos.',
+      'El Almacén y los robos se recuperan de mazos agotados sin dejar la partida bloqueada.',
+    ],
+  },
+  {
     version: '1.1.1',
     changes: [
       'Las salas online aceptan correctamente el formato de asientos que devuelve Firebase y ya no muestran el error de colecciones principales.',

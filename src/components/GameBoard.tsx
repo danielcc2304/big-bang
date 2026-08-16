@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Card, GameCommand, GameLogEntry, GameState, Player } from '../types';
 import { command } from '../game/engine';
+import { peekCards } from '../game/engine/helpers';
 import { CARD_CATALOG } from '../game/cards/catalog';
 import { distanceBetween } from '../game/rules/distance';
 import { characterByName } from '../game/characters/characters';
@@ -44,6 +45,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   const [inspected, setInspected] = useState<Player | null>(null);
   const [reactionCards, setReactionCards] = useState<readonly string[]>([]);
   const [keepCards, setKeepCards] = useState<readonly string[]>([]);
+  const [kitSelectedIds, setKitSelectedIds] = useState<readonly string[]>([]);
   const [debug, setDebug] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(sound.enabled);
   const [visibleEffects, setVisibleEffects] = useState<readonly GameLogEntry[]>([]);
@@ -56,7 +58,10 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   const topDiscard = state.discard.at(-1);
   const topDiscardDefinition = topDiscard ? CARD_CATALOG[topDiscard.name] : null;
   const isHumanTurn = state.turn.currentPlayerId === viewerId && viewer.alive;
+  const kitDrawOptions = viewer.character.name === 'Kit Carlson' && isHumanTurn && state.turn.phase === 'DRAW' ? peekCards(state, 3) : [];
   const canChoosePedroDraw = isHumanTurn && state.turn.phase === 'DRAW' && viewer.character.name === 'Pedro Ramirez' && Boolean(topDiscard);
+  const canChooseKitDraw = isHumanTurn && state.turn.phase === 'DRAW' && viewer.character.name === 'Kit Carlson' && kitDrawOptions.length > 0;
+  const canChooseJesseDraw = isHumanTurn && state.turn.phase === 'DRAW' && viewer.character.name === 'Jesse Jones' && state.players.some((player) => player.id !== viewerId && player.alive && player.hand.length > 0);
   const canPlay = isHumanTurn && state.turn.phase === 'PLAY' && !state.reaction && !state.storeState;
   const latestEffectLogs = useMemo(() => {
     const latestRevision = [...state.logs].reverse().find((entry) => entry.effect)?.revision;
@@ -66,6 +71,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
 
   useEffect(() => { setReactionCards([]); }, [state.reaction?.id]);
   useEffect(() => { if (state.turn.phase !== 'DISCARD') setKeepCards([]); }, [state.turn.phase]);
+  useEffect(() => { if (state.turn.phase !== 'DRAW' || viewer.character.name !== 'Kit Carlson') setKitSelectedIds([]); }, [state.revision, state.turn.phase, viewer.character.name]);
   useEffect(() => {
     const latest = state.logs.at(-1);
     if (!latest || latest.id === lastSoundLogId.current) return;
@@ -93,8 +99,8 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   useEffect(() => {
     if (syncLabel !== 'LOCAL') return;
     if (state.turn.currentPlayerId === viewerId && state.turn.phase === 'TURN_START') dispatch(command(state, viewerId, 'RESOLVE_TURN_START', {}));
-    else if (state.turn.currentPlayerId === viewerId && state.turn.phase === 'DRAW' && !canChoosePedroDraw) dispatch(command(state, viewerId, 'DRAW_CARDS', {}));
-  }, [canChoosePedroDraw, dispatch, state, syncLabel, viewerId]);
+    else if (state.turn.currentPlayerId === viewerId && state.turn.phase === 'DRAW' && !canChoosePedroDraw && !canChooseKitDraw && !canChooseJesseDraw) dispatch(command(state, viewerId, 'DRAW_CARDS', {}));
+  }, [canChooseJesseDraw, canChooseKitDraw, canChoosePedroDraw, dispatch, state, syncLabel, viewerId]);
 
   const opponents = useMemo(() => state.players.filter((player) => player.id !== viewerId), [state.players, viewerId]);
 
@@ -201,6 +207,14 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
 
       {canChoosePedroDraw && topDiscard && topDiscardDefinition && (
         <div className="modal-backdrop"><section className="game-modal" role="dialog" aria-modal="true"><span className="eyebrow">HABILIDAD · PEDRO RAMÍREZ</span><h2>¿De dónde robas la primera?</h2><p>La carta superior del descarte es <b>{topDiscardDefinition.label}</b>. La segunda carta siempre vendrá del mazo.</p><div className="modal-actions"><button onClick={() => dispatch(command(state, viewerId, 'DRAW_CARDS', { firstCardSource: 'DECK' }))}>Robar 2 del mazo</button><button className="primary-action" onClick={() => dispatch(command(state, viewerId, 'DRAW_CARDS', { firstCardSource: 'DISCARD' }))}>Tomar {topDiscardDefinition.label}</button></div></section></div>
+      )}
+
+      {canChooseKitDraw && (
+        <div className="modal-backdrop"><section className="game-modal wide" role="dialog" aria-modal="true"><span className="eyebrow">HABILIDAD · KIT CARLSON</span><h2>Ordena tu robo</h2><p>Mira las tres cartas superiores, elige dos y devuelve la tercera encima del mazo.</p><div className="card-rail modal-rail">{kitDrawOptions.map((card) => <CardView key={card.id} card={card} selected={kitSelectedIds.includes(card.id)} onClick={() => setKitSelectedIds((current) => current.includes(card.id) ? current.filter((id) => id !== card.id) : current.length < Math.min(2, kitDrawOptions.length) ? [...current, card.id] : current)} />)}</div><div className="modal-actions"><button className="primary-action" disabled={kitSelectedIds.length !== Math.min(2, kitDrawOptions.length)} onClick={() => dispatch(command(state, viewerId, 'DRAW_CARDS', { drawCardIds: kitSelectedIds }))}>Robar las seleccionadas</button></div></section></div>
+      )}
+
+      {canChooseJesseDraw && (
+        <div className="modal-backdrop"><section className="game-modal wide" role="dialog" aria-modal="true"><span className="eyebrow">HABILIDAD · JESSE JONES</span><h2>Elige de quién robas</h2><p>Tu primera carta puede salir al azar de la mano de cualquier jugador vivo.</p><div className="modal-actions">{state.players.filter((player) => player.id !== viewerId && player.alive && player.hand.length > 0).map((player) => <button key={player.id} className="primary-action" onClick={() => dispatch(command(state, viewerId, 'DRAW_CARDS', { firstCardSource: 'PLAYER_HAND', sourcePlayerId: player.id }))}>{player.name} ({player.hand.length} cartas)</button>)}<button onClick={() => dispatch(command(state, viewerId, 'DRAW_CARDS', { firstCardSource: 'DECK' }))}>Robar 2 del mazo</button></div></section></div>
       )}
 
       {pendingCardTarget && selectedCard && (selectedCard.name === 'PANIC' || selectedCard.name === 'CAT_BALOU') && (
