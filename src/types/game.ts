@@ -142,7 +142,7 @@ interface CommandBase {
 
 export type GameCommand =
   | (CommandBase & { readonly type: 'PLAY_CARD'; readonly payload: { readonly cardId: string; readonly targetPlayerId?: string; readonly targetCardId?: string; readonly targetCardChoice?: 'RANDOM_HAND' } })
-  | (CommandBase & { readonly type: 'DRAW_CARDS'; readonly payload: { readonly firstCardSource?: 'DECK' | 'DISCARD' } })
+  | (CommandBase & { readonly type: 'DRAW_CARDS'; readonly payload: { readonly firstCardSource?: 'DECK' | 'DISCARD' | 'PLAYER_HAND'; readonly sourcePlayerId?: string; readonly drawCardIds?: readonly string[] } })
   | (CommandBase & { readonly type: 'SELECT_TARGET'; readonly payload: { readonly targetPlayerId: string } })
   | (CommandBase & { readonly type: 'END_TURN'; readonly payload: Record<string, never> })
   | (CommandBase & { readonly type: 'DISCARD_CARDS'; readonly payload: { readonly cardIds: readonly string[] } })
