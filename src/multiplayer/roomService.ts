@@ -12,6 +12,14 @@ import { serverNow, syncServerClock } from '../firebase/clock';
 
 const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const COMMAND_SLOTS = 100;
+const commandSlotStart = (commandId: string): number => {
+  let hash = 2166136261;
+  for (const character of commandId) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % COMMAND_SLOTS;
+};
 const roomCode = (): string => {
   if (globalThis.crypto?.getRandomValues) {
     const bytes = new Uint32Array(6);
@@ -179,7 +187,7 @@ export const processReconnectClaims = async (code: string, coordinatorUid: strin
   const proofs = proofsSnapshot.val() as Record<string, string> | null;
   if (!claims || !proofs) return;
   for (const [uid, claim] of Object.entries(claims)) {
-    if (!claim || typeof claim.hash !== 'string' || typeof claim.requestedAt !== 'number' || serverNow() - claim.requestedAt > 30_000 || claim.requestedAt - serverNow() > 10_000) {
+    if (!claim || typeof claim.hash !== 'string' || !Number.isFinite(claim.requestedAt) || now - claim.requestedAt > 30_000 || claim.requestedAt - now > 10_000) {
       await remove(ref(services.database, `reconnectClaims/${code}/${uid}`));
       continue;
     }
@@ -214,21 +222,35 @@ export const processReconnectClaims = async (code: string, coordinatorUid: strin
 export const enqueueCommand = async (code: string, command: GameCommand, uid: string): Promise<void> => {
   const services = firebaseServices();
   if (!services) throw new Error('Firebase no está configurado.');
+  if (!isGameCommand(command)) throw new Error('La accion no tiene un formato valido.');
+  // Rules validate command timestamps against Firebase's server clock. A
+  // tablet with a wrong local clock must not be rejected before the engine
+  // gets a chance to process its action.
+  const submittedAt = serverNow();
+  const normalizedCommand = { ...command, createdAt: submittedAt } satisfies GameCommand;
   const roomValue = (await get(ref(services.database, `rooms/${code}`))).val() as Room | null;
   const room = roomValue ? hydrateRoom(roomValue) : null;
   if (!room || room.status !== 'PLAYING') throw new Error('La partida no está disponible para recibir acciones.');
-  const seat = Object.values(room.seats).find((candidate) => candidate.playerId === command.playerId);
+  const seat = Object.values(room.seats).find((candidate) => candidate.playerId === normalizedCommand.playerId);
   if (!seat || seat.ownerUid !== uid) throw new Error('No eres propietario de este asiento.');
-  if (Object.keys(room.commands).length >= 100) throw new Error('La cola de acciones está llena. Espera un instante.');
-  const recentByUser = Object.values(room.commands).filter((envelope) => envelope.submittedByUid === uid && serverNow() - envelope.submittedAt < 10_000);
+  const existing = Object.values(room.commands).find((envelope) => envelope?.command?.commandId === normalizedCommand.commandId && envelope.submittedByUid === uid);
+  if (existing || room.commandReceipts?.[normalizedCommand.commandId]) return;
+  if (Object.keys(room.commands).length >= COMMAND_SLOTS) throw new Error('La cola de acciones está llena. Espera un instante.');
+  const recentByUser = Object.values(room.commands).filter((envelope) => envelope.submittedByUid === uid && submittedAt - envelope.submittedAt < 10_000);
   if (recentByUser.length >= 20) throw new Error('Has enviado demasiadas acciones seguidas.');
-  if (!isGameCommand(command)) throw new Error('La accion no tiene un formato valido.');
-  const envelope = { command, submittedByUid: uid, submittedAt: serverNow() };
+  const envelope = { command: normalizedCommand, submittedByUid: uid, submittedAt };
+  const start = commandSlotStart(normalizedCommand.commandId);
   for (let slot = 0; slot < COMMAND_SLOTS; slot += 1) {
-    const slotKey = `slot-${slot}`;
-    if (room.commands[slotKey]) continue;
-    const result = await runTransaction(ref(services.database, `rooms/${code}/commands/${slotKey}`), (current: CommandEnvelope | null) => current === null ? envelope : undefined, { applyLocally: false });
-    if (result.committed) return;
+    const slotKey = `slot-${(start + slot) % COMMAND_SLOTS}`;
+    const result = await runTransaction(ref(services.database, `rooms/${code}/commands/${slotKey}`), (current: CommandEnvelope | null) => {
+      // Returning undefined for an already stored command makes the
+      // transaction a read-only conflict resolution. Returning `current`
+      // would issue a write and violate the RTDB `!data.exists()` rule.
+      if (current?.command?.commandId === normalizedCommand.commandId && current.submittedByUid === uid) return;
+      return current === null ? envelope : undefined;
+    }, { applyLocally: false });
+    const snapshotEnvelope = result.snapshot.val() as CommandEnvelope | null;
+    if (result.committed || (snapshotEnvelope?.command?.commandId === normalizedCommand.commandId && snapshotEnvelope.submittedByUid === uid)) return;
   }
   throw new Error('La cola de acciones se lleno mientras esperabas. Vuelve a intentarlo.');
 };
@@ -274,21 +296,33 @@ export const startOnlineGame = async (code: string, uid: string): Promise<void> 
   if (!result.committed) throw new Error('Solo el host puede iniciar una sala abierta.');
 };
 
-const configurePresence = async (code: string, playerId: string, uid: string): Promise<string> => {
-  const services = firebaseServices()!;
+export const refreshPresence = async (code: string, playerId: string, uid: string, connectionId: string): Promise<void> => {
+  const services = firebaseServices();
+  if (!services) throw new Error('Firebase no está configurado.');
   const presence = ref(services.database, `rooms/${code}/players/${playerId}`);
-  const connectionId = secureId('connection');
   const connection = ref(services.database, `rooms/${code}/presence/${playerId}/${connectionId}`);
   const connectedAt = serverNow();
+  await onDisconnect(connection).set({ uid, connected: false, connectedAt, lastSeen: serverTimestamp() });
+  // Replace the full record after every reconnect so a partially written or
+  // stale presence node can never remain visible as connected.
+  await set(connection, { uid, connected: true, connectedAt, lastSeen: serverTimestamp() });
+  await update(presence, { connected: true, lastSeen: serverTimestamp(), uid });
+};
+
+export const markPresenceOffline = async (code: string, playerId: string, uid: string, connectionId: string): Promise<void> => {
+  const services = firebaseServices();
+  if (!services) return;
+  await update(ref(services.database, `rooms/${code}/presence/${playerId}/${connectionId}`), { uid, connected: false, lastSeen: serverTimestamp() });
+};
+
+const configurePresence = async (code: string, playerId: string, uid: string): Promise<string> => {
+  const services = firebaseServices()!;
+  const connectionId = secureId('connection');
   try {
-    // Firebase authorizes onDisconnect when it is registered. A partial update
-    // cannot create a presence record because the rules require uid/connectedAt.
-    await onDisconnect(connection).set({ uid, connected: false, connectedAt, lastSeen: serverTimestamp() });
-    await set(connection, { uid, connected: true, connectedAt, lastSeen: serverTimestamp() });
-    await update(presence, { connected: true, lastSeen: serverTimestamp(), uid });
+    await refreshPresence(code, playerId, uid, connectionId);
     return connectionId;
   } catch (error) {
-    await remove(connection).catch(() => undefined);
+    await remove(ref(services.database, `rooms/${code}/presence/${playerId}/${connectionId}`)).catch(() => undefined);
     throw error;
   }
 };
@@ -300,3 +334,4 @@ const rollbackLobbySeat = async (code: string, seatNumber: number, uid: string, 
   await remove(ref(services.database, `rooms/${code}/players/${playerId}`)).catch(() => undefined);
   await remove(ref(services.database, `seatProofs/${code}/${seatNumber}`)).catch(() => undefined);
 };
+
