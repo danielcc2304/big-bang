@@ -16,10 +16,18 @@ vi.mock('../firebase/client', () => ({
   firebaseServices: vi.fn(() => ({ database: {} })),
 }));
 
-import { applyAuthoritativeCommand } from './coordinator';
+import { applyAuthoritativeCommand, electCoordinator } from './coordinator';
 
 describe('coordinador online', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it('frena comandos de una concesión anterior al renovar una lease caducada', () => {
+    const expired = { coordinatorId: 'host', coordinatorEpoch: 7, leaseUntil: 100, heartbeat: 90 };
+    const reacquired = electCoordinator(expired, 'host', 101);
+    expect(reacquired).toMatchObject({ coordinatorId: 'host', coordinatorEpoch: 8 });
+    expect(electCoordinator(reacquired, 'host', 102)?.coordinatorEpoch).toBe(8);
+    expect(electCoordinator(reacquired, 'guest', 102)).toBeNull();
+  });
 
   it('retira un comando obsoleto para que no bloquee toda la cola', async () => {
     const canonical = createGame(Array.from({ length: 4 }, (_, index) => ({ id: `p${index}`, name: `P${index}`, kind: 'HUMAN' as const })), 41);
@@ -129,3 +137,4 @@ describe('coordinador online', () => {
     expect(updated?.commandReceipts?.[next.commandId]).toMatchObject({ status: 'APPLIED', submittedByUid: 'guest', revision: canonical.revision + 1 });
   });
 });
+
