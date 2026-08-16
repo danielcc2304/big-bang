@@ -7,6 +7,37 @@ import { makeCard, patchPlayer, setCharacter, testState } from '../../test/helpe
 const drawPhase = () => ({ ...testState(), turn: { ...testState().turn, currentPlayerId: 'p0', phase: 'DRAW' as const } });
 
 describe('habilidades durante la fase de robo', () => {
+  it('Kit Carlson elige dos de las tres cartas reveladas y devuelve la tercera al mazo', () => {
+    let state = setCharacter(drawPhase(), 'p0', 'Kit Carlson');
+    const first = makeCard('BEER', 'kit-first');
+    const second = makeCard('BANG', 'kit-second');
+    const third = makeCard('DYNAMITE', 'kit-third');
+    const tail = makeCard('MISSED', 'kit-tail');
+    state = { ...state, deck: [first, second, third, tail], discard: [] };
+    state = patchPlayer(state, 'p0', { hand: [] });
+
+    const result = applyCommand(state, command(state, 'p0', 'DRAW_CARDS', { drawCardIds: [second.id, third.id] }));
+
+    expect(result.ok).toBe(true);
+    expect(result.state.players[0]!.hand.map((card) => card.id)).toEqual([second.id, third.id]);
+    expect(result.state.deck.map((card) => card.id)).toEqual([first.id, tail.id]);
+  });
+
+  it('Jesse Jones puede robar la primera carta de una mano elegida', () => {
+    let state = setCharacter(drawPhase(), 'p0', 'Jesse Jones');
+    const stolen = makeCard('BEER', 'jesse-stolen');
+    const deckCard = makeCard('BANG', 'jesse-deck');
+    state = patchPlayer(state, 'p0', { hand: [] });
+    state = patchPlayer(state, 'p1', { hand: [stolen] });
+    state = { ...state, deck: [deckCard, ...state.deck], discard: [] };
+
+    const result = applyCommand(state, command(state, 'p0', 'DRAW_CARDS', { firstCardSource: 'PLAYER_HAND', sourcePlayerId: 'p1' }));
+
+    expect(result.ok).toBe(true);
+    expect(result.state.players[0]!.hand.map((card) => card.id)).toEqual([stolen.id, deckCard.id]);
+    expect(result.state.players[1]!.hand).toHaveLength(0);
+  });
+
   it('Pedro Ramírez puede tomar la primera carta del descarte y la segunda del mazo', () => {
     let state = setCharacter(drawPhase(), 'p0', 'Pedro Ramirez');
     const discarded = makeCard('BEER', 'pedro-discard');
