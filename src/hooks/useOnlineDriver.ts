@@ -107,7 +107,12 @@ export const useOnlineDriver = (code: string, room: Room | null, uid: string): v
       if (state.turn.phase === 'TURN_START' || state.turn.phase === 'DRAW') {
         const current = state.players.find((player) => player.id === state.turn.currentPlayerId);
         const automatedDrawActor = state.turn.phase === 'DRAW' && automatedActorId(latestRoom) === current?.id;
-        if (state.turn.phase === 'DRAW' && current?.kind === 'HUMAN' && current.character.name === 'Pedro Ramirez' && state.discard.length > 0 && !automatedDrawActor) return;
+        const humanNeedsDrawChoice = state.turn.phase === 'DRAW' && current?.kind === 'HUMAN' && !automatedDrawActor && (
+          current.character.name === 'Pedro Ramirez' && state.discard.length > 0
+          || current.character.name === 'Kit Carlson'
+          || current.character.name === 'Jesse Jones' && state.players.some((player) => player.id !== current.id && player.alive && player.hand.length > 0)
+        );
+        if (humanNeedsDrawChoice) return;
         automatic = state.turn.phase === 'TURN_START'
           ? command(state, state.turn.currentPlayerId, 'RESOLVE_TURN_START', {})
           : command(state, state.turn.currentPlayerId, 'DRAW_CARDS', { firstCardSource: current?.character.name === 'Pedro Ramirez' && state.discard.length > 0 ? 'DISCARD' : 'DECK' });
