@@ -82,6 +82,23 @@ describe('cartas de acción y equipo', () => {
     expect(state.logs.at(-1)?.effect).toMatchObject({ card: spade, success: false, headline: '¡BOOM!' });
   });
 
+  it('Lucky Duke elige automáticamente el mejor de sus dos desenfundes', () => {
+    let state = playPhase(testState(), 'p1');
+    const bang = makeCard('BANG', 'lucky-bang');
+    const barrel = makeCard('BARREL', 'lucky-barrel');
+    const miss = makeCard('MISSED', 'lucky-miss', 'CLUBS', '7');
+    const heart = makeCard('BEER', 'lucky-heart', 'HEARTS', '7');
+    state = patchPlayer(state, 'p0', { character: { ...state.players[0]!.character, name: 'Lucky Duke', ability: 'test', lives: 4 }, equipment: { ...state.players[0]!.equipment, barrel } });
+    state = patchPlayer(state, 'p1', { hand: [bang] });
+    state = { ...state, deck: [miss, heart, ...state.deck] };
+
+    state = run(state, command(state, 'p1', 'PLAY_CARD', { cardId: bang.id, targetPlayerId: 'p0' }));
+
+    expect(state.reaction).toBeNull();
+    expect(state.logs.some((entry) => entry.message.includes('elige'))).toBe(true);
+    expect([...state.logs].reverse().find((entry) => entry.effect)?.effect).toMatchObject({ card: heart, success: true });
+  });
+
   it('Almacén entrega exactamente una carta por jugador y vacía el pool', () => {
     let state = playPhase(testState()); const store = makeCard('GENERAL_STORE', 'store');
     state = patchPlayer(state, 'p0', { hand: [store] });
