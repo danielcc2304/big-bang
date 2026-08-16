@@ -31,6 +31,9 @@ try {
   const stranger = env.authenticatedContext('stranger').database();
   const recoverer = env.authenticatedContext('recoverer').database();
 
+  // createRoom reserves a fresh code with a transaction, whose preflight read
+  // must be allowed while the room path is still empty.
+  await assertSucceeds(host.ref('rooms/EMPTY1').get());
   await assertSucceeds(host.ref('rooms/ABC123').set(room));
   await assertSucceeds(host.ref('seatProofs/ABC123/0').set('a'.repeat(64)));
   await assertFails(recoverer.ref('reconnectClaims/ABC123/recoverer').set({ hash: 'b'.repeat(64), requestedAt: Date.now() }));
@@ -76,3 +79,4 @@ try {
 } finally {
   await env.cleanup();
 }
+
