@@ -25,7 +25,9 @@ export const isGameCommand = (value: unknown): value is GameCommand => {
   switch (value.type) {
     case 'PLAY_CARD':
       return isString(payload.cardId) && (payload.targetPlayerId === undefined || isString(payload.targetPlayerId)) && (payload.targetCardId === undefined || isString(payload.targetCardId)) && (payload.targetCardChoice === undefined || payload.targetCardChoice === 'RANDOM_HAND');
-    case 'DRAW_CARDS': return payload.firstCardSource === undefined || isString(payload.firstCardSource);
+    case 'DRAW_CARDS': return (payload.firstCardSource === undefined || isString(payload.firstCardSource))
+      && (payload.sourcePlayerId === undefined || isString(payload.sourcePlayerId))
+      && (payload.drawCardIds === undefined || isStringArray(payload.drawCardIds, 3));
     case 'SELECT_TARGET': return isString(payload.targetPlayerId);
     case 'END_TURN': return isEmptyPayload(payload);
     case 'DISCARD_CARDS': return isStringArray(payload.cardIds);
