@@ -7,8 +7,16 @@ import { command } from '../game/engine';
 import { hydrateGameCommand } from '../multiplayer/hydrate';
 import { automatedActorId, stateForAutomatedActor } from '../multiplayer/onlineAutomation';
 
+// RTDB transactions normally settle quickly, but a suspended mobile tab can
+// leave a promise pending while the transport is reconnecting. Never let that
+// pending promise permanently block the local coordinator loop.
+const withTimeout = <T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> => new Promise<T>((resolve, reject) => {
+  const timeout = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+  operation.then((value) => { window.clearTimeout(timeout); resolve(value); }, (error: unknown) => { window.clearTimeout(timeout); reject(error instanceof Error ? error : new Error(String(error))); });
+});
+
 const safely = (operation: Promise<unknown>, label: string): void => {
-  void operation.catch((error: unknown) => console.error(`[online] ${label}`, error));
+  void withTimeout(operation, 15_000, `Tiempo de espera agotado: ${label}`).catch((error: unknown) => console.error(`[online] ${label}`, error));
 };
 
 export const useOnlineDriver = (code: string, room: Room | null, uid: string): void => {
@@ -43,7 +51,9 @@ export const useOnlineDriver = (code: string, room: Room | null, uid: string): v
       const latest = roomRef.current;
       if (!latest || leaseIsValid(latest.coordinator) || acquiring) return;
       acquiring = true;
-      void acquireCoordinatorLease(code, uid).catch((error: unknown) => console.error('[online] acquire coordinator lease', error)).finally(() => { acquiring = false; });
+      void withTimeout(acquireCoordinatorLease(code, uid), 15_000, 'Tiempo de espera agotado al renovar el coordinador.')
+        .catch((error: unknown) => console.error('[online] acquire coordinator lease', error))
+        .finally(() => { acquiring = false; });
     };
     acquireExpiredLease();
     const retry = window.setInterval(acquireExpiredLease, 1_000);
@@ -77,7 +87,9 @@ export const useOnlineDriver = (code: string, room: Room | null, uid: string): v
       const operation = normalized
         ? applyAuthoritativeCommand(code, normalized, uid, coordinatorEpoch)
         : removeMalformedCommand(code, currentQueued.key, uid, coordinatorEpoch);
-      void operation.catch((error: unknown) => console.error('[online] process queued command', error)).finally(() => { processing = false; });
+      void withTimeout(operation, 15_000, 'Tiempo de espera agotado al procesar la acción.')
+        .catch((error: unknown) => console.error('[online] process queued command', error))
+        .finally(() => { processing = false; });
     };
     processQueued();
     const retry = window.setInterval(processQueued, 700);
@@ -141,7 +153,7 @@ export const useOnlineDriver = (code: string, room: Room | null, uid: string): v
           return;
         }
         automationInFlightRef.current = true;
-        void applyAuthoritativeCommand(code, automatic, uid, epoch)
+        void withTimeout(applyAuthoritativeCommand(code, automatic, uid, epoch), 15_000, 'Tiempo de espera agotado al ejecutar la IA.')
           .catch((error: unknown) => console.error('[online] automatic game command', error))
           .finally(() => { automationInFlightRef.current = false; });
       }, delay);
@@ -151,3 +163,4 @@ export const useOnlineDriver = (code: string, room: Room | null, uid: string): v
     return () => { window.clearInterval(poll); clearAutomation(); };
   }, [code, coordinatorEpoch, coordinatorId, status, uid]);
 };
+
