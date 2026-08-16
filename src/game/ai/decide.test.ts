@@ -69,7 +69,7 @@ describe('estrategia de objetivos de la IA', () => {
     const decision = decideAiCommand(state, 'p1', initialKnowledge(state, 'p1'));
 
     expect(decision?.type).toBe('USE_CHARACTER_ABILITY');
-    if (decision?.type === 'USE_CHARACTER_ABILITY') expect([...decision.payload.cardIds].sort()).toEqual(['sid-bang', 'sid-missed']);
+    if (decision?.type === 'USE_CHARACTER_ABILITY') expect([...(decision.payload.cardIds ?? [])].sort()).toEqual(['sid-bang', 'sid-missed']);
   });
 
   it('el Renegado evita atacar al Sheriff mientras haya más rivales', () => {
