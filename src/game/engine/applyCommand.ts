@@ -6,7 +6,7 @@ import { seededRandom } from '../../utils/random';
 import { assertGameState } from './invariants';
 import { isGameCommand } from './commands';
 import {
-  damagePlayer, discardFromHand, drawCards, healPlayer, nextLivingPlayerId, playerById, replacePlayer,
+  damagePlayer, discardFromHand, drawCards, healPlayer, nextLivingPlayerId, peekCards, playerById, refillSuzyIfNeeded, replacePlayer,
 } from './helpers';
 
 const fail = (state: GameState, code: string, message: string): CommandFailure => ({ ok: false, state, error: { code, message } });
@@ -15,6 +15,18 @@ const hasAllCards = (player: Player, ids: readonly string[]): boolean => ids.eve
 
 const SUIT_LABEL: Record<Card['suit'], string> = { SPADES: 'picas', HEARTS: 'corazones', DIAMONDS: 'diamantes', CLUBS: 'tréboles' };
 const cardResult = (card: Card): string => `${CARD_CATALOG[card.name].label} (${card.rank} de ${SUIT_LABEL[card.suit]})`;
+
+const drawJudgement = (state: GameState, player: Player, success: (card: Card) => boolean): { readonly state: GameState; readonly card: Card | undefined; readonly lucky: boolean; readonly revealed: readonly Card[] } => {
+  const lucky = player.character.name === 'Lucky Duke';
+  const draw = drawCards(state, lucky ? 2 : 1);
+  const chosen = draw.cards.find(success) ?? draw.cards[0];
+  return {
+    state: { ...draw.state, discard: [...draw.state.discard, ...draw.cards] },
+    card: chosen,
+    lucky,
+    revealed: draw.cards,
+  };
+};
 
 const log = (state: GameState, message: string, tone: 'NORMAL' | 'ACTION' | 'DANGER' | 'SYSTEM' = 'NORMAL', effect?: GameLogEntry['effect']): GameState => {
   const revision = state.revision + 1;
@@ -32,7 +44,8 @@ const equipField = (name: CardName): 'weapon' | 'barrel' | 'mustang' | 'scope' |
 
 const removePlayedCard = (state: GameState, player: Player, card: Card, discard = true): GameState => {
   const next = replacePlayer(state, { ...player, hand: player.hand.filter((candidate) => candidate.id !== card.id) });
-  return discard ? { ...next, discard: [...next.discard, card] } : next;
+  const withDiscard = discard ? { ...next, discard: [...next.discard, card] } : next;
+  return refillSuzyIfNeeded(withDiscard, player.id);
 };
 
 const createReaction = (state: GameState, type: Reaction['type'], sourceId: string, targetId: string, requiredCards: number, createdAt: number): GameState => ({
@@ -46,14 +59,15 @@ const barrelCheck = (state: GameState, target: Player, requiredSuccesses: number
   let next = state;
   let successes = 0;
   for (let index = 0; index < checks && successes < requiredSuccesses; index += 1) {
-    const draw = drawCards(next, 1);
-    const card = draw.cards[0];
-    next = card ? { ...draw.state, discard: [...draw.state.discard, card] } : draw.state;
+    const draw = drawJudgement(next, target, (card) => card.suit === 'HEARTS');
+    const card = draw.card;
+    next = draw.state;
     if (card) {
       const success = card.suit === 'HEARTS';
       if (success) successes += 1;
       const source = index === 0 && target.equipment.barrel ? 'el Barril' : 'la habilidad de Jourdonnais';
-      next = log(next, `${target.name} desenfunda ${cardResult(card)} con ${source}: ${success ? 'evita un impacto de BANG!' : 'no consigue protegerse'}.`, success ? 'ACTION' : 'DANGER', {
+      const revealed = draw.lucky ? ` revela ${draw.revealed.map(cardResult).join(' y ')} y elige ${cardResult(card)}` : ` desenfunda ${cardResult(card)}`;
+      next = log(next, `${target.name}${revealed} con ${source}: ${success ? 'evita un impacto de BANG!' : 'no consigue protegerse'}.`, success ? 'ACTION' : 'DANGER', {
         kind: 'JUDGEMENT', playerId: target.id, card, success, headline: success ? '¡SE SALVA!' : 'EL BARRIL FALLA',
       });
     }
@@ -121,10 +135,10 @@ const resolveTurnStart = (state: GameState, player: Player): GameState => {
   let current = playerById(next, player.id)!;
   if (current.equipment.dynamite) {
     const dynamite = current.equipment.dynamite;
-    const draw = drawCards(next, 1);
-    const judgement = draw.cards[0];
+    const draw = drawJudgement(next, current, (card) => !(card.suit === 'SPADES' && Number(card.rank) >= 2 && Number(card.rank) <= 9));
+    const judgement = draw.card;
     let dynamiteRecipient: Player | undefined;
-    next = judgement ? { ...draw.state, discard: [...draw.state.discard, judgement] } : draw.state;
+    next = draw.state;
     current = playerById(next, player.id)!;
     next = replacePlayer(next, { ...current, equipment: { ...current.equipment, dynamite: null } });
     const exploded = judgement?.suit === 'SPADES' && Number(judgement.rank) >= 2 && Number(judgement.rank) <= 9;
@@ -141,7 +155,8 @@ const resolveTurnStart = (state: GameState, player: Player): GameState => {
       else next = { ...next, discard: [...next.discard, dynamite] };
     }
     if (judgement) {
-      next = log(next, `${player.name} desenfunda ${cardResult(judgement)} por la Dinamita: ${exploded ? '¡explota y pierde 3 vidas!' : `se salva${dynamiteRecipient ? ` y la Dinamita pasa a ${dynamiteRecipient.name}` : '; la Dinamita se descarta porque no puede pasar'}`}.`, exploded ? 'DANGER' : 'ACTION', {
+      const revealed = draw.lucky ? ` revela ${draw.revealed.map(cardResult).join(' y ')} y elige ${cardResult(judgement)}` : ` desenfunda ${cardResult(judgement)}`;
+      next = log(next, `${player.name}${revealed} por la Dinamita: ${exploded ? '¡explota y pierde 3 vidas!' : `se salva${dynamiteRecipient ? ` y la Dinamita pasa a ${dynamiteRecipient.name}` : '; la Dinamita se descarta porque no puede pasar'}`}.`, exploded ? 'DANGER' : 'ACTION', {
         kind: 'JUDGEMENT', playerId: player.id, card: judgement, success: !exploded, headline: exploded ? '¡BOOM!' : 'PASA DE LARGO',
       });
     }
@@ -154,15 +169,18 @@ const resolveTurnStart = (state: GameState, player: Player): GameState => {
   }
   if (current.equipment.jail) {
     const jail = current.equipment.jail;
-    const draw = drawCards(next, 1);
-    const judgement = draw.cards[0];
-    next = judgement ? { ...draw.state, discard: [...draw.state.discard, judgement, jail] } : { ...draw.state, discard: [...draw.state.discard, jail] };
+    const draw = drawJudgement(next, current, (card) => card.suit === 'HEARTS');
+    const judgement = draw.card;
+    next = { ...draw.state, discard: [...draw.state.discard, jail] };
     current = playerById(next, player.id)!;
     next = replacePlayer(next, { ...current, equipment: { ...current.equipment, jail: null } });
     const escaped = judgement?.suit === 'HEARTS';
-    if (judgement) next = log(next, `${player.name} desenfunda ${cardResult(judgement)} en Prisión: ${escaped ? 'sale libre y juega su turno' : 'permanece encerrado y pierde el turno'}.`, escaped ? 'ACTION' : 'DANGER', {
+    if (judgement) {
+      const revealed = draw.lucky ? ` revela ${draw.revealed.map(cardResult).join(' y ')} y elige ${cardResult(judgement)}` : ` desenfunda ${cardResult(judgement)}`;
+      next = log(next, `${player.name}${revealed} en Prisión: ${escaped ? 'sale libre y juega su turno' : 'permanece encerrado y pierde el turno'}.`, escaped ? 'ACTION' : 'DANGER', {
       kind: 'JUDGEMENT', playerId: player.id, card: judgement, success: escaped, headline: escaped ? '¡LIBRE!' : 'PIERDE EL TURNO',
-    });
+      });
+    }
     if (!escaped) {
       const nextId = nextLivingPlayerId(next, player.id);
       return { ...next, turn: { number: next.turn.number + 1, currentPlayerId: nextId, phase: 'TURN_START', pendingDiscardCount: 0 } };
@@ -182,7 +200,7 @@ const takeTargetCard = (state: GameState, source: Player, target: Player, cardId
   let updatedTarget = target;
   if (equipmentMatch) updatedTarget = { ...target, equipment: { ...target.equipment, [equipmentMatch[0]]: null } };
   else updatedTarget = { ...target, hand: target.hand.filter((candidate) => candidate.id !== card.id) };
-  let next = replacePlayer(state, updatedTarget);
+  let next = refillSuzyIfNeeded(replacePlayer(state, updatedTarget), target.id);
   if (discard) next = { ...next, discard: [...next.discard, card] };
   else next = replacePlayer(next, { ...source, hand: [...source.hand, card] });
   return { ok: true, state: next };
@@ -255,7 +273,9 @@ const playCard = (state: GameState, command: Extract<GameCommand, { type: 'PLAY_
     const order = [...alive.slice(startIndex), ...alive.slice(0, startIndex)].map((p) => p.id);
     let next = removePlayedCard(state, player, card);
     const draw = drawCards(next, alive.length);
-    next = { ...draw.state, storeState: { id: `store-${state.revision + 1}`, cards: draw.cards, order, currentIndex: 0, currentPlayerId: order[0]!, pickedBy: {} }, turn: { ...next.turn, phase: 'STORE' } };
+    if (draw.cards.length === 0) return { ok: true, state: log({ ...draw.state, turn: { ...draw.state.turn, phase: 'PLAY' } }, `${player.name} abre el Almacén, pero no quedan cartas para repartir.`, 'ACTION') };
+    const storeOrder = order.slice(0, draw.cards.length);
+    next = { ...draw.state, storeState: { id: `store-${state.revision + 1}`, cards: draw.cards, order: storeOrder, currentIndex: 0, currentPlayerId: storeOrder[0]!, pickedBy: {} }, turn: { ...draw.state.turn, phase: 'STORE' } };
     return { ok: true, state: log(next, `${player.name} abre el Almacén.`, 'ACTION') };
   }
 
@@ -288,9 +308,29 @@ const handleCommand = (state: GameState, command: GameCommand): CommandResult =>
     case 'DRAW_CARDS': {
       if (state.turn.currentPlayerId !== player.id || state.turn.phase !== 'DRAW') return fail(state, 'NOT_DRAW_PHASE', 'No puedes robar ahora.');
       const firstCardSource = command.payload.firstCardSource ?? 'DECK';
-      if (firstCardSource !== 'DECK' && firstCardSource !== 'DISCARD') return fail(state, 'INVALID_DRAW_SOURCE', 'La procedencia del robo no es válida.');
+      const drawCardIds = command.payload.drawCardIds ?? [];
+      if (!['DECK', 'DISCARD', 'PLAYER_HAND'].includes(firstCardSource)) return fail(state, 'INVALID_DRAW_SOURCE', 'La procedencia del robo no es válida.');
       if (firstCardSource === 'DISCARD' && player.character.name !== 'Pedro Ramirez') return fail(state, 'ABILITY_NOT_AVAILABLE', 'Solo Pedro Ramírez puede robar del descarte.');
       if (firstCardSource === 'DISCARD' && state.discard.length === 0) return fail(state, 'EMPTY_DISCARD', 'No hay ninguna carta en el descarte.');
+      if (firstCardSource === 'PLAYER_HAND' && player.character.name !== 'Jesse Jones') return fail(state, 'ABILITY_NOT_AVAILABLE', 'Solo Jesse Jones puede robar de la mano de otro jugador.');
+      if (firstCardSource === 'PLAYER_HAND' && !command.payload.sourcePlayerId) return fail(state, 'DRAW_SOURCE_REQUIRED', 'Jesse debe elegir a un jugador del que robar.');
+      if (player.character.name === 'Kit Carlson' && firstCardSource !== 'DECK') return fail(state, 'INVALID_DRAW_SOURCE', 'Kit Carlson solo puede ordenar las cartas del mazo.');
+      if (player.character.name !== 'Kit Carlson' && drawCardIds.length > 0) return fail(state, 'ABILITY_NOT_AVAILABLE', 'La elección de cartas solo está disponible para Kit Carlson.');
+
+      if (player.character.name === 'Kit Carlson') {
+        const revealed = peekCards(state, 3);
+        const selected = revealed.filter((card) => drawCardIds.includes(card.id));
+        const required = Math.min(2, revealed.length);
+        if (required === 0) return fail(state, 'EMPTY_DECK', 'No hay cartas para robar.');
+        if (drawCardIds.length !== required || selected.length !== required) return fail(state, 'KIT_CHOICE_REQUIRED', `Kit Carlson debe elegir ${required} cartas entre las ${revealed.length} reveladas.`);
+        const draw = drawCards(state, revealed.length);
+        const returned = draw.cards.filter((card) => !drawCardIds.includes(card.id));
+        const ordered = [...selected, ...draw.cards.filter((card) => drawCardIds.includes(card.id) && !selected.some((chosen) => chosen.id === card.id))];
+        const current = playerById(draw.state, player.id)!;
+        const next = replacePlayer({ ...draw.state, deck: [...returned, ...draw.state.deck] }, { ...current, hand: [...current.hand, ...ordered] });
+        return { ok: true, state: log({ ...next, turn: { ...next.turn, phase: 'PLAY' } }, `${player.name} mira ${revealed.length} cartas, elige ${ordered.length} y devuelve ${revealed.length - ordered.length} al mazo.`, 'ACTION') };
+      }
+
       const discardedCard = firstCardSource === 'DISCARD' ? state.discard.at(-1) : undefined;
       let draw = firstCardSource === 'DISCARD'
         ? (() => {
@@ -298,7 +338,19 @@ const handleCommand = (state: GameState, command: GameCommand): CommandResult =>
             const second = drawCards(withoutDiscard, 1);
             return { state: second.state, cards: [discardedCard!, ...second.cards] };
           })()
-        : drawCards(state, 2);
+        : firstCardSource === 'PLAYER_HAND'
+          ? (() => {
+              const source = state.players.find((candidate) => candidate.id === command.payload.sourcePlayerId && candidate.id !== player.id && candidate.alive);
+              if (!source || source.hand.length === 0) return { state, cards: [] as readonly Card[] };
+              const random = seededRandom(state.seed ^ Math.imul(state.revision + 1, 0x9E3779B1) ^ source.seat);
+              const card = source.hand[Math.floor(random.next() * source.hand.length)];
+              if (!card) return { state, cards: [] as readonly Card[] };
+              const withoutCard = refillSuzyIfNeeded(replacePlayer(state, { ...source, hand: source.hand.filter((candidate) => candidate.id !== card.id) }), source.id);
+              const second = drawCards(withoutCard, 1);
+              return { state: second.state, cards: [card, ...second.cards] };
+            })()
+          : drawCards(state, 2);
+      if (firstCardSource === 'PLAYER_HAND' && draw.cards.length === 0) return fail(state, 'INVALID_DRAW_SOURCE', 'Ese jugador no tiene cartas que Jesse pueda robar.');
       let count = draw.cards.length;
       const blackJackReveal = player.character.name === 'Black Jack' ? draw.cards[1] : undefined;
       if (blackJackReveal && isRed(blackJackReveal)) {
@@ -310,6 +362,8 @@ const handleCommand = (state: GameState, command: GameCommand): CommandResult =>
       const next = replacePlayer(draw.state, { ...current, hand: [...current.hand, ...draw.cards] });
       const message = firstCardSource === 'DISCARD'
         ? `${player.name} roba la última carta del descarte y ${Math.max(0, count - 1)} del mazo.`
+        : firstCardSource === 'PLAYER_HAND'
+          ? `${player.name} roba una carta de la mano de ${state.players.find((candidate) => candidate.id === command.payload.sourcePlayerId)?.name ?? 'otro jugador'} y ${Math.max(0, count - 1)} del mazo.`
         : `${player.name} roba ${count} cartas.`;
       let logged = log({ ...next, turn: { ...next.turn, phase: 'PLAY' } }, message);
       if (blackJackReveal) {
@@ -354,6 +408,7 @@ const handleCommand = (state: GameState, command: GameCommand): CommandResult =>
       return { ok: true, state: log(next, `${player.name} elige ${CARD_CATALOG[card.name].label} del Almacén.`) };
     }
     case 'USE_CHARACTER_ABILITY': {
+      if (state.turn.currentPlayerId !== player.id || state.turn.phase !== 'PLAY' || state.reaction || state.storeState) return fail(state, 'NOT_PLAY_PHASE', 'No puedes usar la habilidad ahora.');
       if (player.character.name !== 'Sid Ketchum') return fail(state, 'ABILITY_NOT_ACTIVE', 'Este personaje no tiene una habilidad activa.');
       const ids = command.payload.cardIds ?? [];
       if (ids.length !== 2 || !hasAllCards(player, ids) || player.lives >= player.maxLives) return fail(state, 'INVALID_ABILITY', 'Descarta dos cartas para recuperar una vida.');
