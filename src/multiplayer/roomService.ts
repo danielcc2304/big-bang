@@ -29,6 +29,11 @@ const roomCode = (): string => {
   return Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
 };
 const normalizeCode = (value: string): string => value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+const isPermissionDenied = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { readonly code?: unknown }).code;
+  return code === 'PERMISSION_DENIED' || code === 'permission_denied';
+};
 
 export interface RoomIdentity { readonly code: string; readonly uid: string; readonly playerId: string; readonly reconnectToken: string; readonly presenceConnectionId?: string }
 
@@ -50,8 +55,20 @@ export const createRoom = async (displayName: string, maxPlayers: 4 | 5 | 6 | 7,
       coordinator: { coordinatorId: user.uid, coordinatorEpoch: 1, leaseUntil: now + LEASE_DURATION_MS, heartbeat: now },
       canonical: null, commands: {}, commandReceipts: {}, presence: {},
     };
-    const transaction = await runTransaction(ref(services.database, `rooms/${code}`), (current: Room | null) => current === null ? room : undefined, { applyLocally: false });
-    if (transaction.committed) {
+    let committed = false;
+    try {
+      const transaction = await runTransaction(ref(services.database, `rooms/${code}`), (current: Room | null) => current === null ? room : undefined, { applyLocally: false });
+      committed = transaction.committed;
+    } catch (error) {
+      // Older deployments may still have the hardened room read rule that
+      // rejects the null preflight read required by a transaction. A direct
+      // create remains protected by the room .write condition (!data.exists())
+      // and lets those deployments recover without weakening collision safety.
+      if (!isPermissionDenied(error)) throw error;
+      await set(ref(services.database, `rooms/${code}`), room);
+      committed = true;
+    }
+    if (committed) {
       try {
         await set(ref(services.database, `seatProofs/${code}/0`), hash);
         saveReconnectToken(code, token);
