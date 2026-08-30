@@ -171,8 +171,8 @@ const hydratePresence = (presence: Room['presence'] | null | undefined): Presenc
 export const hydrateRoom = (room: Room): Room => {
   if (!isRecord(room) || !isString(room.code, 16) || !['LOBBY', 'PLAYING', 'ENDED'].includes(String(room.status)) || !isFiniteNumber(room.createdAt) || !isString(room.hostUid, 128) || ![4, 5, 6, 7].includes(Number(room.maxPlayers)) || !['OFFICIAL', 'DRAFT_TWO'].includes(String(room.characterMode)) || !isRecord(room.coordinator)) throw new Error('La sala recibida no tiene un formato valido.');
   if (!isString(room.coordinator.coordinatorId, 128) || !isFiniteNumber(room.coordinator.coordinatorEpoch) || !Number.isInteger(room.coordinator.coordinatorEpoch) || !isFiniteNumber(room.coordinator.leaseUntil) || !isFiniteNumber(room.coordinator.heartbeat)) throw new Error('La sala contiene un coordinador invalido.');
-  // Realtime Database serializes dense numeric keys (such as seat 0, 1, 2...)
-  // as an array and removes empty maps. Normalize both valid wire formats.
+  // JSONB/realtime adapters can serialize dense numeric keys (such as seat 0,
+  // 1, 2...) as an array and remove empty maps. Normalize both wire formats.
   const seats = room.seats ?? {};
   const players = room.players ?? {};
   const commands = room.commands ?? {};

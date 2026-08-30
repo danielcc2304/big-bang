@@ -19,7 +19,7 @@ export const RELEASE_NOTES: readonly ReleaseNotes[] = [
   {
     version: '1.1.1',
     changes: [
-      'Las salas online aceptan correctamente el formato de asientos que devuelve Firebase y ya no muestran el error de colecciones principales.',
+      'Las salas online aceptan correctamente el formato de asientos que devuelve Supabase y ya no muestran el error de colecciones principales.',
     ],
   },
   {
@@ -37,7 +37,7 @@ export const RELEASE_NOTES: readonly ReleaseNotes[] = [
     version: '1.0.0',
     changes: [
       'Primera versión jugable del saloon para 4–7 jugadores.',
-      'Modo local contra IA y salas online con Firebase.',
+      'Modo local contra IA y salas online con Supabase Realtime.',
       'Motor determinista por comandos, roles secretos y reglas del juego base.',
       'Reconexión de jugadores y mesa adaptada a móvil y escritorio.',
     ],

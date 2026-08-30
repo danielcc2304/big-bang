@@ -1,9 +1,13 @@
-import { ref, runTransaction } from 'firebase/database';
 import type { CommandEnvelope, CommandReceipt, CommandResult, CoordinatorLease, GameCommand, Room } from '../types';
-import { firebaseServices } from '../firebase/client';
-import { hydrateGameCommand, hydrateRoom } from './hydrate';
 import { applyCommand } from '../game/engine';
-import { serverNow } from '../firebase/clock';
+import { hydrateGameCommand } from './hydrate';
+import { serverNow } from '../supabase/clock';
+import {
+  acquireLeaseRecord,
+  applyRoomStateRecord,
+  getRoomSnapshot,
+  renewLeaseRecord,
+} from './supabaseRepository';
 
 export const LEASE_DURATION_MS = 12_000;
 const MAX_RECEIPTS = 200;
@@ -20,27 +24,17 @@ export const electCoordinator = (current: CoordinatorLease | null, candidateId: 
   };
 };
 
-export const acquireCoordinatorLease = async (roomCode: string, uid: string, fixedNow?: number): Promise<CoordinatorLease | null> => {
-  const services = firebaseServices();
-  if (!services) throw new Error('Firebase no está configurado.');
-  const result = await runTransaction(ref(services.database, `rooms/${roomCode}/coordinator`), (current: CoordinatorLease | null) => {
-    // Firebase can retry this callback. Read the clock on every attempt so an old
-    // attempt cannot install a lease that is already expired.
-    return electCoordinator(current, uid, fixedNow ?? serverNow()) ?? undefined;
-  }, { applyLocally: false });
-  return result.committed ? result.snapshot.val() as CoordinatorLease : null;
+export const acquireCoordinatorLease = async (roomCode: string, _uid: string, _fixedNow?: number): Promise<CoordinatorLease | null> => {
+  void _uid;
+  void _fixedNow;
+  const result = await acquireLeaseRecord(roomCode);
+  return result.acquired && result.lease ? result.lease : null;
 };
 
-export const renewCoordinatorLease = async (roomCode: string, uid: string, epoch: number, fixedNow?: number): Promise<boolean> => {
-  const services = firebaseServices();
-  if (!services) return false;
-  const result = await runTransaction(ref(services.database, `rooms/${roomCode}/coordinator`), (current: CoordinatorLease | null) => {
-    if (!current || current.coordinatorId !== uid || current.coordinatorEpoch !== epoch) return;
-    const now = fixedNow ?? serverNow();
-    if (current.leaseUntil <= now) return;
-    return { ...current, leaseUntil: now + LEASE_DURATION_MS, heartbeat: now };
-  }, { applyLocally: false });
-  return result.committed;
+export const renewCoordinatorLease = async (roomCode: string, _uid: string, epoch: number, _fixedNow?: number): Promise<boolean> => {
+  void _uid;
+  void _fixedNow;
+  return renewLeaseRecord(roomCode, epoch);
 };
 
 const receiptFor = (room: Room, commandId: string, coordinatorUid: string, status: CommandReceipt['status'], updatedAt: number, error?: string, revision?: number): CommandReceipt | null => {
@@ -63,8 +57,8 @@ const withReceipt = (room: Room, receipt: CommandReceipt | null): Room => {
   return { ...room, commandReceipts: Object.fromEntries(entries) };
 };
 
-const removeCommand = (room: Room, commandId: string): Readonly<Record<string, CommandEnvelope>> => Object.fromEntries(
-  Object.entries(room.commands ?? {}).filter(([key, envelope]) => key !== commandId && envelope?.command?.commandId !== commandId),
+const removeCommand = (room: Room, identifier: string): Readonly<Record<string, CommandEnvelope>> => Object.fromEntries(
+  Object.entries(room.commands ?? {}).filter(([slotKey, envelope]) => slotKey !== identifier && envelope?.command?.commandId !== identifier),
 );
 
 const sanitizedCommands = (room: Room): Readonly<Record<string, CommandEnvelope>> => Object.fromEntries(
@@ -74,63 +68,74 @@ const sanitizedCommands = (room: Room): Readonly<Record<string, CommandEnvelope>
   }),
 );
 
+const queuedSlot = (room: Room, identifier: string): string | null => Object.entries(room.commands ?? {}).find(([slotKey, envelope]) => slotKey === identifier || envelope?.command?.commandId === identifier)?.[0] ?? null;
+
 export const applyAuthoritativeCommand = async (roomCode: string, command: GameCommand, uid: string, epoch: number, fixedNow?: number): Promise<boolean> => {
-  const services = firebaseServices();
-  if (!services) throw new Error('Firebase no está configurado.');
-  const result = await runTransaction(ref(services.database, `rooms/${roomCode}`), (value: Room | null) => {
-    const room = value ? hydrateRoom(value) : null;
-    const now = fixedNow ?? serverNow();
-    if (!room?.canonical || room.status === 'ENDED') return;
-    const lease = room.coordinator;
-    if (lease.coordinatorId !== uid || lease.coordinatorEpoch !== epoch || lease.leaseUntil <= now) return;
-    const safeRoom = { ...room, commands: sanitizedCommands(room) };
-    const rawCommandId = typeof (command as unknown as { readonly commandId?: unknown })?.commandId === 'string' ? (command as unknown as { readonly commandId: string }).commandId : '';
-    let hydratedCommand: GameCommand;
-    try {
-      hydratedCommand = hydrateGameCommand(command);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'El comando recibido estaba corrupto.';
-      return withReceipt({ ...safeRoom, commands: removeCommand(safeRoom, rawCommandId) }, receiptFor(room, rawCommandId, uid, 'REJECTED', now, message));
-    }
-    const remainingCommands = removeCommand(safeRoom, hydratedCommand.commandId);
-    const base = { ...safeRoom, commands: remainingCommands };
-    const queuedEnvelope = Object.values(safeRoom.commands ?? {}).find((envelope) => envelope?.command?.commandId === hydratedCommand.commandId);
-    if (queuedEnvelope && now - queuedEnvelope.submittedAt > 60_000) {
-      return withReceipt(base, receiptFor(room, hydratedCommand.commandId, uid, 'REJECTED', now, 'La acción caducó mientras esperaba en la cola.'));
-    }
-    if (room.canonical.processedCommandIds.includes(hydratedCommand.commandId)) {
-      return withReceipt(base, receiptFor(room, hydratedCommand.commandId, uid, 'APPLIED', now, undefined, room.canonical.revision));
-    }
-    const concurrentDraftChoice = hydratedCommand.type === 'CHARACTER_CHOICE' && room.canonical.turn.phase === 'CHARACTER_CHOICE' && !room.canonical.characterDraft?.chosenByPlayer[hydratedCommand.playerId];
-    if (room.canonical.revision !== hydratedCommand.expectedRevision && !concurrentDraftChoice) {
-      return withReceipt(base, receiptFor(room, hydratedCommand.commandId, uid, 'REJECTED', now, `La partida avanzó hasta la revisión ${room.canonical.revision}.`));
-    }
-    const authoritativeCommand = concurrentDraftChoice ? { ...hydratedCommand, expectedRevision: room.canonical.revision } : hydratedCommand;
-    let applied: CommandResult;
-    try {
-      applied = applyCommand(room.canonical, authoritativeCommand);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'El comando no se pudo procesar.';
-      return withReceipt(base, receiptFor(room, hydratedCommand.commandId, uid, 'REJECTED', now, message));
-    }
-    if (!applied.ok) return withReceipt(base, receiptFor(room, hydratedCommand.commandId, uid, 'REJECTED', now, applied.error.message));
-    const next = { ...base, canonical: applied.state };
-    return withReceipt(next, receiptFor(room, hydratedCommand.commandId, uid, 'APPLIED', now, undefined, applied.state.revision));
-  }, { applyLocally: false });
-  return result.committed;
+  const room = await getRoomSnapshot(roomCode);
+  const now = fixedNow ?? serverNow();
+  if (!room?.canonical || room.status === 'ENDED' || room.coordinator.coordinatorId !== uid || room.coordinator.coordinatorEpoch !== epoch || room.coordinator.leaseUntil <= now) return false;
+  const safeRoom: Room = { ...room, commands: sanitizedCommands(room) };
+  const rawCommandId = typeof (command as unknown as { readonly commandId?: unknown })?.commandId === 'string' ? (command as unknown as { readonly commandId: string }).commandId : '';
+  let hydratedCommand: GameCommand;
+  try {
+    hydratedCommand = hydrateGameCommand(command);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'El comando recibido estaba corrupto.';
+    const next = { ...safeRoom, commands: removeCommand(safeRoom, rawCommandId) };
+    const receipt = receiptFor(room, rawCommandId, uid, 'REJECTED', now, message);
+    const result = await applyRoomStateRecord(roomCode, room.transportVersion ?? 0, epoch, withReceipt(next, receipt), rawCommandId || null, queuedSlot(room, rawCommandId), receipt);
+    return result.applied;
+  }
+  const remainingCommands = removeCommand(safeRoom, hydratedCommand.commandId);
+  const base = { ...safeRoom, commands: remainingCommands };
+  const queuedEnvelope = Object.values(safeRoom.commands ?? {}).find((envelope) => envelope?.command?.commandId === hydratedCommand.commandId);
+  if (queuedEnvelope && now - queuedEnvelope.submittedAt > 60_000) {
+    const receipt = receiptFor(room, hydratedCommand.commandId, uid, 'REJECTED', now, 'La acción caducó mientras esperaba en la cola.');
+    const result = await applyRoomStateRecord(roomCode, room.transportVersion ?? 0, epoch, withReceipt(base, receipt), hydratedCommand.commandId, queuedSlot(room, hydratedCommand.commandId), receipt);
+    return result.applied;
+  }
+  if (room.canonical.processedCommandIds.includes(hydratedCommand.commandId)) {
+    const receipt = receiptFor(room, hydratedCommand.commandId, uid, 'APPLIED', now, undefined, room.canonical.revision);
+    const result = await applyRoomStateRecord(roomCode, room.transportVersion ?? 0, epoch, withReceipt(base, receipt), hydratedCommand.commandId, queuedSlot(room, hydratedCommand.commandId), receipt);
+    return result.applied;
+  }
+  const concurrentDraftChoice = hydratedCommand.type === 'CHARACTER_CHOICE' && room.canonical.turn.phase === 'CHARACTER_CHOICE' && !room.canonical.characterDraft?.chosenByPlayer[hydratedCommand.playerId];
+  if (room.canonical.revision !== hydratedCommand.expectedRevision && !concurrentDraftChoice) {
+    const receipt = receiptFor(room, hydratedCommand.commandId, uid, 'REJECTED', now, `La partida avanzó hasta la revisión ${room.canonical.revision}.`);
+    const result = await applyRoomStateRecord(roomCode, room.transportVersion ?? 0, epoch, withReceipt(base, receipt), hydratedCommand.commandId, queuedSlot(room, hydratedCommand.commandId), receipt);
+    return result.applied;
+  }
+  const authoritativeCommand = concurrentDraftChoice ? { ...hydratedCommand, expectedRevision: room.canonical.revision } : hydratedCommand;
+  let applied: CommandResult;
+  try {
+    applied = applyCommand(room.canonical, authoritativeCommand);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'El comando no se pudo procesar.';
+    const receipt = receiptFor(room, hydratedCommand.commandId, uid, 'REJECTED', now, message);
+    const result = await applyRoomStateRecord(roomCode, room.transportVersion ?? 0, epoch, withReceipt(base, receipt), hydratedCommand.commandId, queuedSlot(room, hydratedCommand.commandId), receipt);
+    return result.applied;
+  }
+  if (!applied.ok) {
+    const receipt = receiptFor(room, hydratedCommand.commandId, uid, 'REJECTED', now, applied.error.message);
+    const result = await applyRoomStateRecord(roomCode, room.transportVersion ?? 0, epoch, withReceipt(base, receipt), hydratedCommand.commandId, queuedSlot(room, hydratedCommand.commandId), receipt);
+    return result.applied;
+  }
+  const receipt = receiptFor(room, hydratedCommand.commandId, uid, 'APPLIED', now, undefined, applied.state.revision);
+  const next = withReceipt({ ...base, canonical: applied.state }, receipt);
+  const result = await applyRoomStateRecord(roomCode, room.transportVersion ?? 0, epoch, next, hydratedCommand.commandId, queuedSlot(room, hydratedCommand.commandId), receipt);
+  return result.applied;
 };
 
 export const removeMalformedCommand = async (roomCode: string, commandId: string, uid: string, epoch: number): Promise<boolean> => {
-  const services = firebaseServices();
-  if (!services) return false;
-  const result = await runTransaction(ref(services.database, `rooms/${roomCode}`), (value: Room | null) => {
-    const room = value ? hydrateRoom(value) : null;
-    const now = serverNow();
-    if (!room?.canonical || room.status === 'ENDED' || room.coordinator.coordinatorId !== uid || room.coordinator.coordinatorEpoch !== epoch || room.coordinator.leaseUntil <= now) return;
-    const safeRoom = { ...room, commands: sanitizedCommands(room) };
-    const envelope = Object.values(safeRoom.commands ?? {}).find((candidate) => candidate?.command?.commandId === commandId);
-    const receipt: CommandReceipt | null = envelope ? { commandId, submittedByUid: envelope.submittedByUid, status: 'REJECTED', updatedAt: now, error: 'La acción recibida estaba corrupta.' } : null;
-    return withReceipt({ ...safeRoom, commands: removeCommand(safeRoom, commandId) }, receipt);
-  }, { applyLocally: false });
-  return result.committed;
+  const room = await getRoomSnapshot(roomCode);
+  const now = serverNow();
+  if (!room?.canonical || room.status === 'ENDED' || room.coordinator.coordinatorId !== uid || room.coordinator.coordinatorEpoch !== epoch || room.coordinator.leaseUntil <= now) return false;
+  const safeRoom = { ...room, commands: sanitizedCommands(room) };
+  const entry = Object.entries(room.commands ?? {}).find(([slotKey, candidate]) => slotKey === commandId || candidate?.command?.commandId === commandId);
+  const envelope = entry?.[1];
+  const actualCommandId = typeof envelope?.command?.commandId === 'string' ? envelope.command.commandId : null;
+  const receipt: CommandReceipt | null = envelope && actualCommandId ? { commandId: actualCommandId, submittedByUid: envelope.submittedByUid, status: 'REJECTED', updatedAt: now, error: 'La acción recibida estaba corrupta.' } : null;
+  const next = withReceipt({ ...safeRoom, commands: removeCommand(safeRoom, commandId) }, receipt);
+  const result = await applyRoomStateRecord(roomCode, room.transportVersion ?? 0, epoch, next, actualCommandId, entry?.[0] ?? null, actualCommandId ? receipt : null);
+  return result.applied;
 };
