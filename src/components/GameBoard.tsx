@@ -25,6 +25,11 @@ const ROLE_COPY = {
   OUTLAW: ['Forajido', 'Elimina al Sheriff.'],
   RENEGADE: ['Renegado', 'Sé el último con vida y elimina al Sheriff al final.'],
 } as const;
+const WINNER_COPY = {
+  LAW: ['La ley prevalece', 'El Sheriff y sus Ayudantes han limpiado el pueblo.'],
+  OUTLAWS: ['Los Forajidos toman el pueblo', 'El Sheriff ha caído y la banda reclama la recompensa.'],
+  RENEGADE: ['El Renegado queda en pie', 'Solo una sombra sigue respirando en el saloon.'],
+} as const;
 const SUIT_SYMBOL: Record<Card['suit'], string> = { SPADES: '♠', HEARTS: '♥', DIAMONDS: '♦', CLUBS: '♣' };
 
 const soundForLog = (message: string): Parameters<typeof sound.play>[0] => {
@@ -46,6 +51,8 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   const [reactionCards, setReactionCards] = useState<readonly string[]>([]);
   const [keepCards, setKeepCards] = useState<readonly string[]>([]);
   const [kitSelectedIds, setKitSelectedIds] = useState<readonly string[]>([]);
+  const [sidSelectionOpen, setSidSelectionOpen] = useState(false);
+  const [sidSelectedIds, setSidSelectedIds] = useState<readonly string[]>([]);
   const [debug, setDebug] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(sound.enabled);
   const [visibleEffects, setVisibleEffects] = useState<readonly GameLogEntry[]>([]);
@@ -74,6 +81,12 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   useEffect(() => { setReactionCards([]); }, [state.reaction?.id]);
   useEffect(() => { if (state.turn.phase !== 'DISCARD') setKeepCards([]); }, [state.turn.phase]);
   useEffect(() => { if (state.turn.phase !== 'DRAW' || viewer.character.name !== 'Kit Carlson') setKitSelectedIds([]); }, [state.revision, state.turn.phase, viewer.character.name]);
+  useEffect(() => {
+    if (viewer.character.name !== 'Sid Ketchum' || !canPlay) {
+      setSidSelectionOpen(false);
+      setSidSelectedIds([]);
+    }
+  }, [canPlay, viewer.character.name]);
   useEffect(() => {
     const latest = state.logs.at(-1);
     if (!latest || latest.id === lastSoundLogId.current) return;
@@ -150,6 +163,15 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
 
   const endTurn = (): void => { dispatch(command(state, viewerId, 'END_TURN', {})); setSelectedCardId(null); setPendingCardTargetId(null); };
   const toggleKeep = (cardId: string): void => setKeepCards((current) => current.includes(cardId) ? current.filter((id) => id !== cardId) : current.length < viewer.lives ? [...current, cardId] : current);
+  const toggleSidCard = (cardId: string): void => setSidSelectedIds((current) => current.includes(cardId) ? current.filter((id) => id !== cardId) : current.length < 2 ? [...current, cardId] : current);
+  const confirmSidHealing = (): void => {
+    if (sidSelectedIds.length !== 2) return;
+    if (dispatch(command(state, viewerId, 'USE_CHARACTER_ABILITY', { cardIds: sidSelectedIds }))) {
+      setSidSelectionOpen(false);
+      setSidSelectedIds([]);
+      sound.play('beer');
+    }
+  };
   const confirmKeep = (): void => {
     const discards = viewer.hand.filter((card) => !keepCards.includes(card.id)).map((card) => card.id);
     dispatch(command(state, viewerId, 'DISCARD_CARDS', { cardIds: discards }));
@@ -179,7 +201,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
       <section className="saloon-table" aria-label="Mesa de juego">
         <div className="table-brand" aria-hidden="true">SALOON<span>EST. 1876</span></div>
         <div className="opponent-grid">
-          {opponents.map((player) => <PlayerPanel key={player.id} player={player} state={state} viewerId={viewerId} targetable={Boolean(selectedCard && player.alive)} onSelect={() => targetPlayer(player)} onInspect={() => setInspected(player)} />)}
+          {opponents.map((player) => <PlayerPanel key={player.id} player={player} state={state} viewerId={viewerId} targetable={Boolean(selectedCard && player.alive)} revealRoles={Boolean(state.winner)} onSelect={() => targetPlayer(player)} onInspect={() => setInspected(player)} />)}
         </div>
         <div className="table-center">
           <div className="deck-pile"><span>✦</span><small>{state.deck.length}</small></div>
@@ -187,7 +209,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
           <div className="discard-pile" aria-label={topDiscardDefinition ? `Último descarte: ${topDiscardDefinition.label}` : 'Pila de descartes vacía'}><strong>{topDiscardDefinition?.label ?? 'Descarte'}</strong><span aria-hidden="true">{topDiscardDefinition?.icon ?? '○'}</span><small>{state.discard.length}</small></div>
         </div>
         <div className="viewer-panel">
-          <PlayerPanel player={viewer} state={state} viewerId={viewerId} targetable={false} onSelect={() => undefined} onInspect={() => setInspected(viewer)} />
+          <PlayerPanel player={viewer} state={state} viewerId={viewerId} targetable={false} revealRoles={Boolean(state.winner)} onSelect={() => undefined} onInspect={() => setInspected(viewer)} />
         </div>
       </section>
 
@@ -200,7 +222,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
 
       <footer className="action-dock">
         <button className="secondary-action" onClick={() => setInspected(viewer)}>Tu ficha</button>
-        {viewer.character.name === 'Sid Ketchum' && <button className="secondary-action" disabled={!canPlay || viewer.hand.length < 2 || viewer.lives >= viewer.maxLives} onClick={() => dispatch(command(state, viewerId, 'USE_CHARACTER_ABILITY', { cardIds: viewer.hand.slice(0, 2).map((card) => card.id) }))}>Curar</button>}
+        {viewer.character.name === 'Sid Ketchum' && <button className="secondary-action" disabled={!canPlay || viewer.hand.length < 2 || viewer.lives >= viewer.maxLives} onClick={() => { setSidSelectedIds([]); setSidSelectionOpen(true); }}>Curar</button>}
         <button className="primary-action" disabled={!canPlay} onClick={endTurn}>Terminar turno</button>
       </footer>
 
@@ -222,6 +244,10 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
         <div className="modal-backdrop"><section className="game-modal wide" role="dialog" aria-modal="true"><span className="eyebrow">HABILIDAD · JESSE JONES</span><h2>Elige de quién robas</h2><p>Tu primera carta puede salir al azar de la mano de cualquier jugador vivo.</p><div className="modal-actions">{state.players.filter((player) => player.id !== viewerId && player.alive && player.hand.length > 0).map((player) => <button key={player.id} className="primary-action" onClick={() => dispatch(command(state, viewerId, 'DRAW_CARDS', { firstCardSource: 'PLAYER_HAND', sourcePlayerId: player.id }))}>{player.name} ({player.hand.length} cartas)</button>)}<button onClick={() => dispatch(command(state, viewerId, 'DRAW_CARDS', { firstCardSource: 'DECK' }))}>Robar 2 del mazo</button></div></section></div>
       )}
 
+      {sidSelectionOpen && (
+        <div className="modal-backdrop"><section className="game-modal wide" role="dialog" aria-modal="true" aria-labelledby="sid-healing-title"><span className="eyebrow">HABILIDAD · SID KETCHUM</span><h2 id="sid-healing-title">Elige 2 cartas para descartar</h2><p>Descarta exactamente dos cartas de tu mano para recuperar una vida. Puedes usar la habilidad varias veces, pero nunca superar tus vidas iniciales.</p><div className="card-rail modal-rail">{viewer.hand.map((card) => <CardView key={card.id} card={card} selected={sidSelectedIds.includes(card.id)} onClick={() => toggleSidCard(card.id)} />)}</div><div className="modal-actions"><button onClick={() => { setSidSelectionOpen(false); setSidSelectedIds([]); }}>Cancelar</button><button className="primary-action" disabled={sidSelectedIds.length !== 2} onClick={confirmSidHealing}>Descartar {sidSelectedIds.length}/2 y curar</button></div></section></div>
+      )}
+
       {pendingCardTarget && selectedCard && (selectedCard.name === 'PANIC' || selectedCard.name === 'CAT_BALOU') && (
         <div className="modal-backdrop"><section className="game-modal wide" role="dialog" aria-modal="true" aria-labelledby="target-card-title"><span className="eyebrow">{CARD_CATALOG[selectedCard.name].label.toUpperCase()}</span><h2 id="target-card-title">{selectedCard.name === 'CAT_BALOU' ? 'Elige qué carta eliminar' : 'Elige qué carta robar'}</h2><p>Puedes elegir una carta pública de <b>{pendingCardTarget.name}</b> o probar suerte con una carta aleatoria de su mano.</p>{pendingCardTarget.hand.length > 0 && <div className="modal-actions"><button className="primary-action" onClick={() => takeTargetCard(undefined, 'RANDOM_HAND')}>Carta aleatoria de la mano ({pendingCardTarget.hand.length})</button></div>}<div className="card-rail modal-rail">{pendingPublicCards.map((card) => <CardView key={card.id} card={card} onClick={() => takeTargetCard(card.id)} />)}</div>{pendingCardTarget.hand.length === 0 && pendingPublicCards.length === 0 && <p>Ese rival no tiene cartas que puedas elegir.</p>}<div className="modal-actions"><button onClick={() => setPendingCardTargetId(null)}>Cancelar</button></div></section></div>
       )}
@@ -240,7 +266,7 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
 
       {inspected && <div className="drawer-backdrop" onClick={() => setInspected(null)}><aside className="player-drawer" onClick={(event) => event.stopPropagation()}><button className="drawer-close" onClick={() => setInspected(null)}>×</button><span className="eyebrow">FICHA DE JUGADOR</span><h2>{inspected.name}</h2><h3>{inspected.character.name}</h3><p className="ability-copy">{inspected.character.ability}</p><dl><div><dt>Vidas</dt><dd>{inspected.lives}/{inspected.maxLives}</dd></div><div><dt>Mano</dt><dd>{inspected.hand.length}</dd></div><div><dt>Distancia</dt><dd>{distanceBetween(state, viewerId, inspected.id)}</dd></div></dl><h4>Equipo público</h4><p>{Object.values(inspected.equipment).filter((card): card is Card => card !== null).map((card) => CARD_CATALOG[card.name].label).join(' · ') || 'Sin cartas en juego'}</p></aside></div>}
 
-      {state.winner && <div className="modal-backdrop"><section className="game-modal victory"><span className="eyebrow">PARTIDA TERMINADA</span><h2>{state.winner === 'LAW' ? 'La ley prevalece' : state.winner === 'OUTLAWS' ? 'Los Forajidos toman el pueblo' : 'El Renegado queda en pie'}</h2><button className="primary-action" onClick={onExit}>Volver al saloon</button></section></div>}
+      {state.winner && <div className="modal-backdrop victory-backdrop"><section className="game-modal victory-modal" role="dialog" aria-modal="true" aria-labelledby="victory-title"><div className="victory-burst" aria-hidden="true"><span>★</span></div><span className="eyebrow">PARTIDA TERMINADA · ROLES REVELADOS</span><h2 id="victory-title">{WINNER_COPY[state.winner][0]}</h2><p className="victory-lede">{WINNER_COPY[state.winner][1]}</p><div className="winner-seal"><span>GANADOR</span><b>{state.winner === 'LAW' ? 'LEY' : state.winner === 'OUTLAWS' ? 'FORAJIDOS' : 'RENEGADO'}</b></div><div className="role-reveal-grid" aria-label="Roles finales">{[...state.players].sort((left, right) => left.seat - right.seat).map((player, index) => <article className={`role-reveal-card role-${player.role.toLowerCase()} ${player.alive ? 'standing' : 'eliminated'}`} key={player.id} style={{ animationDelay: `${index * 90}ms` }}><span className="role-reveal-icon" aria-hidden="true">{player.role === 'SHERIFF' ? '★' : player.role === 'DEPUTY' ? '✦' : player.role === 'OUTLAW' ? '✹' : '☾'}</span><h3>{player.name}</h3><strong>{ROLE_COPY[player.role][0]}</strong><p>{player.character.name}</p><small>{player.alive ? 'EN PIE' : 'ELIMINADO'}</small></article>)}</div><p className="victory-note">Los roles y las habilidades quedan visibles para toda la mesa.</p><button className="primary-action" onClick={onExit}>Volver al saloon</button></section></div>}
 
       {debug && <aside className="debug-panel"><button onClick={() => setDebug(false)}>×</button><b>DEBUG MULTIPLAYER</b><span>local revision: {state.revision}</span><span>server revision: —</span><span>coordinator: local</span><span>epoch: 0</span><span>phase: {state.turn.phase}</span><span>waitingFor: {state.reaction?.targetPlayerId ?? state.storeState?.currentPlayerId ?? '—'}</span><span>command queue: 0</span><span>último error: {error ?? '—'}</span></aside>}
     </main>
