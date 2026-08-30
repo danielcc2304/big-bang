@@ -2,11 +2,13 @@ import type { Card, GameCommand, GameState, Player } from '../../types';
 import { command } from '../engine/commands';
 import { peekCards } from '../engine/helpers';
 import { characterByName } from '../characters/characters';
-import { distanceBetween, isInRange } from '../rules/distance';
+import { distanceBetween, isInRange, weaponRange } from '../rules/distance';
 import type { AiKnowledge } from './knowledge';
 
 const publicEquipment = (player: Player): readonly Card[] => Object.values(player.equipment).filter((card): card is Card => card !== null);
 const drawValue: Partial<Record<Card['name'], number>> = { BANG: 10, MISSED: 9, BEER: 8, VOLCANIC: 8, WINCHESTER: 8, REV_CARABINE: 7, REMINGTON: 6, SCHOFIELD: 5, BARREL: 6, MUSTANG: 5, SCOPE: 5, DYNAMITE: 4, JAIL: 4 };
+const CARDINAL_RANGE: Partial<Record<Card['name'], number>> = { VOLCANIC: 1, SCHOFIELD: 2, REMINGTON: 3, REV_CARABINE: 4, WINCHESTER: 5 };
+const weaponValue = (card: Card): number => card.kind === 'WEAPON' ? (card.name === 'VOLCANIC' ? 7 : (card.name === 'WINCHESTER' ? 6 : CARDINAL_RANGE[card.name] ?? 2)) : 0;
 
 export const aiDecisionDelay = (state: GameState): number => {
   if (state.turn.phase === 'CHARACTER_CHOICE') return 900;
@@ -25,10 +27,14 @@ const targetScore = (state: GameState, actor: Player, target: Player, knowledge:
   // The Sheriff is public information; every other role must be inferred from
   // public actions instead of reading target.role (which would make the AI
   // omniscient and is the reason every bot used to tunnel the Sheriff).
-  if (actor.role === 'OUTLAW') return sheriff ? 1_000 : 120 + outlawLikelihood * 35 - target.lives * 2;
+  if (actor.role === 'OUTLAW') {
+    // Outlaws must pressure the Sheriff, but should not waste attacks on a
+    // player who public evidence already suggests is another Outlaw.
+    return sheriff ? 1_000 : (suspicion?.law ?? 0) * 130 - outlawLikelihood * 95 - renegadeLikelihood * 25 - target.lives * 2;
+  }
   if (actor.role === 'RENEGADE') {
     if (sheriff) return aliveCount === 2 ? 1_000 : -250;
-    return outlawLikelihood * 120 + renegadeLikelihood * 20 + target.lives * 2;
+    return outlawLikelihood * 135 - renegadeLikelihood * 70 - target.lives * 3;
   }
   if (sheriff) return -1_000;
   // Law players remove the most likely Outlaw, but when evidence is equal
@@ -40,6 +46,15 @@ const chooseTarget = (state: GameState, actor: Player, knowledge: AiKnowledge, r
   state.players
     .filter((target) => target.alive && target.id !== actor.id && predicate(target) && (range === undefined || distanceBetween(state, actor.id, target.id) <= range))
     .sort((a, b) => targetScore(state, actor, b, knowledge) - targetScore(state, actor, a, knowledge) || a.lives - b.lives)[0];
+
+const canPlayEquipment = (actor: Player, card: Card): boolean => {
+  if (card.kind === 'WEAPON') return weaponRange(actor) < (CARDINAL_RANGE[card.name] ?? 1);
+  if (card.name === 'BARREL') return !actor.equipment.barrel || actor.character.name === 'Jourdonnais';
+  if (card.name === 'MUSTANG') return !actor.equipment.mustang || actor.character.name === 'Paul Regret';
+  if (card.name === 'SCOPE') return !actor.equipment.scope || actor.character.name === 'Rose Doolan';
+  if (card.name === 'DYNAMITE') return !actor.equipment.dynamite;
+  return false;
+};
 
 export const decideAiCommand = (state: GameState, playerId: string, knowledge: AiKnowledge): GameCommand | null => {
   const actor = state.players.find((player) => player.id === playerId);
@@ -56,7 +71,7 @@ export const decideAiCommand = (state: GameState, playerId: string, knowledge: A
     return command(state, actor.id, 'REACTION', { cardIds: cards.map((card) => card.id) });
   }
   if (state.storeState?.currentPlayerId === actor.id) {
-    const value: Partial<Record<Card['name'], number>> = { BEER: 10, MISSED: 9, BANG: 8, WINCHESTER: 7, VOLCANIC: 7, BARREL: 6 };
+    const value: Partial<Record<Card['name'], number>> = { BEER: 10, MISSED: 9, BANG: 8, WINCHESTER: 7, VOLCANIC: 7, BARREL: 6, SCOPE: 5, MUSTANG: 5, DYNAMITE: 4 };
     const card = [...state.storeState.cards].sort((a, b) => (value[b.name] ?? 2) - (value[a.name] ?? 2))[0];
     return card ? command(state, actor.id, 'STORE_PICK', { cardId: card.id }) : null;
   }
@@ -91,11 +106,15 @@ export const decideAiCommand = (state: GameState, playerId: string, knowledge: A
   if (beer && actor.lives < actor.maxLives && state.players.filter((p) => p.alive).length > 2) return command(state, actor.id, 'PLAY_CARD', { cardId: beer.id });
   const drawCard = actor.hand.find((card) => card.name === 'WELLS_FARGO' || card.name === 'STAGECOACH');
   if (drawCard) return command(state, actor.id, 'PLAY_CARD', { cardId: drawCard.id });
-  const equipment = actor.hand.find((card) => card.kind === 'WEAPON' || ['BARREL', 'MUSTANG', 'SCOPE', 'DYNAMITE'].includes(card.name));
+  const equipment = [...actor.hand]
+    .filter((card) => canPlayEquipment(actor, card))
+    .sort((left, right) => weaponValue(right) - weaponValue(left) || (drawValue[right.name] ?? 2) - (drawValue[left.name] ?? 2))[0];
   if (equipment) return command(state, actor.id, 'PLAY_CARD', { cardId: equipment.id });
   const aliveCount = state.players.filter((player) => player.alive).length;
+  const canBenefitFromSaloon = state.players.some((player) => player.alive && player.lives < player.maxLives);
   const area = actor.hand.find((card) => {
-    if (card.name === 'SALOON' || card.name === 'GENERAL_STORE') return true;
+    if (card.name === 'SALOON') return canBenefitFromSaloon;
+    if (card.name === 'GENERAL_STORE') return state.deck.length + state.discard.length > 0;
     if (card.name !== 'GATLING' && card.name !== 'INDIANS') return false;
     return actor.role === 'OUTLAW' || actor.role === 'SHERIFF' || actor.role === 'RENEGADE' && aliveCount === 2;
   });
@@ -116,10 +135,11 @@ export const decideAiCommand = (state: GameState, playerId: string, knowledge: A
   const duel = actor.hand.find((card) => card.name === 'DUEL');
   if (duel && anyTarget) return command(state, actor.id, 'PLAY_CARD', { cardId: duel.id, targetPlayerId: anyTarget.id });
   const jail = actor.hand.find((card) => card.name === 'JAIL');
-  if (jail && anyTarget && anyTarget.role !== 'SHERIFF' && !anyTarget.equipment.jail) return command(state, actor.id, 'PLAY_CARD', { cardId: jail.id, targetPlayerId: anyTarget.id });
+  const jailTarget = chooseTarget(state, actor, knowledge, undefined, (target) => target.role !== 'SHERIFF' && !target.equipment.jail);
+  if (jail && jailTarget) return command(state, actor.id, 'PLAY_CARD', { cardId: jail.id, targetPlayerId: jailTarget.id });
   const bang = actor.hand.find((card) => card.name === 'BANG' || actor.character.name === 'Calamity Janet' && card.name === 'MISSED');
-  const bangTarget = chooseTarget(state, actor, knowledge);
+  const bangTarget = chooseTarget(state, actor, knowledge, undefined, (target) => isInRange(state, actor.id, target.id));
   const unlimitedBang = actor.character.name === 'Willy the Kid' || actor.equipment.weapon?.name === 'VOLCANIC';
-  if (bang && bangTarget && (unlimitedBang || actor.bangsPlayedThisTurn === 0) && isInRange(state, actor.id, bangTarget.id)) return command(state, actor.id, 'PLAY_CARD', { cardId: bang.id, targetPlayerId: bangTarget.id });
+  if (bang && bangTarget && (unlimitedBang || actor.bangsPlayedThisTurn === 0)) return command(state, actor.id, 'PLAY_CARD', { cardId: bang.id, targetPlayerId: bangTarget.id });
   return command(state, actor.id, 'END_TURN', {});
 };
