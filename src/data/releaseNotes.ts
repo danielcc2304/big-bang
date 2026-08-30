@@ -9,6 +9,14 @@ export const APP_VERSION = packageMetadata.version;
 
 export const RELEASE_NOTES: readonly ReleaseNotes[] = [
   {
+    version: '1.2.2',
+    changes: [
+      'Al terminar la partida, una pantalla de victoria animada revela el bando, personaje y estado final de cada jugador.',
+      'Sid Ketchum permite elegir exactamente las dos cartas que descarta para recuperar una vida.',
+      'La IA mejora sus objetivos por equipo, respeta el alcance y evita jugadas ilegales o mejoras de equipo peores.',
+    ],
+  },
+  {
     version: '1.2.1',
     changes: [
       'Los avisos de acción de la mesa desaparecen automáticamente tras unos segundos, también mientras la partida online recibe actualizaciones en tiempo real.',
