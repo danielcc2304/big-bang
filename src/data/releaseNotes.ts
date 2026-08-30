@@ -9,6 +9,13 @@ export const APP_VERSION = packageMetadata.version;
 
 export const RELEASE_NOTES: readonly ReleaseNotes[] = [
   {
+    version: '1.2.3',
+    changes: [
+      'El Barril resuelve sus juicios contra el estado canónico actual, también después de hidratar una partida online.',
+      'Los fallos de juicio del Barril quedan registrados y mantienen correctamente la reacción de ¡Fallaste! cuando corresponde.',
+    ],
+  },
+  {
     version: '1.2.2',
     changes: [
       'Al terminar la partida, una pantalla de victoria animada revela el bando, personaje y estado final de cada jugador.',
