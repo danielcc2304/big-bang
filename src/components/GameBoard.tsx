@@ -68,6 +68,8 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
     return latestRevision === undefined ? [] : state.logs.filter((entry) => entry.revision === latestRevision && entry.effect).slice(-2);
   }, [state.logs]);
   const latestEffectKey = latestEffectLogs.map((entry) => entry.id).join('|');
+  const latestEffectLogsRef = useRef<readonly GameLogEntry[]>(latestEffectLogs);
+  latestEffectLogsRef.current = latestEffectLogs;
 
   useEffect(() => { setReactionCards([]); }, [state.reaction?.id]);
   useEffect(() => { if (state.turn.phase !== 'DISCARD') setKeepCards([]); }, [state.turn.phase]);
@@ -91,11 +93,14 @@ export const GameBoard = ({ state, viewerId, error, dispatch, onExit, syncLabel 
   }, [state.winner, viewer.role]);
   useEffect(() => { if (error) sound.play('error'); }, [error]);
   useEffect(() => {
-    if (!latestEffectKey) return;
-    setVisibleEffects(latestEffectLogs);
+    if (!latestEffectKey) {
+      setVisibleEffects([]);
+      return;
+    }
+    setVisibleEffects(latestEffectLogsRef.current);
     const timer = window.setTimeout(() => setVisibleEffects([]), 3_200);
     return () => window.clearTimeout(timer);
-  }, [latestEffectKey, latestEffectLogs]);
+  }, [latestEffectKey]);
   useEffect(() => {
     if (syncLabel !== 'LOCAL') return;
     if (state.turn.currentPlayerId === viewerId && state.turn.phase === 'TURN_START') dispatch(command(state, viewerId, 'RESOLVE_TURN_START', {}));
