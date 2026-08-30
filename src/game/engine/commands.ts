@@ -18,7 +18,7 @@ const isString = (value: unknown): value is string => typeof value === 'string' 
 const isStringArray = (value: unknown, max = 32): value is readonly string[] => Array.isArray(value) && value.length <= max && value.every(isString) && new Set(value).size === value.length;
 const isEmptyPayload = (value: unknown): value is Record<string, never> => isRecord(value) && Object.keys(value).length === 0;
 
-/** Runtime validation for commands read from an untrusted Realtime Database snapshot. */
+/** Runtime validation for commands read from an untrusted realtime snapshot. */
 export const isGameCommand = (value: unknown): value is GameCommand => {
   if (!isRecord(value) || !isString(value.commandId) || !isString(value.playerId) || typeof value.expectedRevision !== 'number' || !Number.isInteger(value.expectedRevision) || typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt) || !isString(value.type) || !isRecord(value.payload)) return false;
   const payload = value.payload;
