@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createGame } from '../game/engine';
 import { characterByName } from '../game/characters/characters';
@@ -25,6 +25,30 @@ describe('GameBoard', () => {
 
     expect(screen.getByText('¡LIBRE!')).toBeInTheDocument();
     expect(screen.getAllByText('Jugador 1 sale libre de Prisión.')).toHaveLength(2);
+  });
+
+  it.each(['LOCAL', 'ONLINE'] as const)('oculta el aviso superior después de 3,2 segundos aunque se actualice el estado (%s)', (syncLabel) => {
+    vi.useFakeTimers();
+    try {
+      const base = createGame(setups, 13);
+      const revealed = base.deck[0]!;
+      const state = {
+        ...base,
+        logs: [...base.logs, { id: 'effect-timer', revision: base.revision, message: 'Jugador 1 sale libre de Prisión.', tone: 'ACTION' as const, effect: { kind: 'JUDGEMENT' as const, playerId: setups[0]!.id, card: revealed, success: true, headline: '¡LIBRE!' } }],
+        turn: { ...base.turn, currentPlayerId: setups[1]!.id, phase: 'PLAY' as const },
+      };
+      const view = render(<GameBoard state={state} viewerId={setups[0]!.id} error={null} dispatch={() => true} onExit={() => undefined} syncLabel={syncLabel} />);
+      const board = within(view.container);
+
+      expect(board.getByText('¡LIBRE!')).toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(2_000); });
+      act(() => { view.rerender(<GameBoard state={{ ...state, logs: [...state.logs] }} viewerId={setups[0]!.id} error={null} dispatch={() => true} onExit={() => undefined} syncLabel={syncLabel} />); });
+      act(() => { vi.advanceTimersByTime(1_200); });
+
+      expect(board.queryByText('¡LIBRE!')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('muestra el nombre de la última carta descartada', () => {
