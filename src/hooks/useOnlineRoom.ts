@@ -1,8 +1,7 @@
-import { onValue, ref, serverTimestamp, update } from 'firebase/database';
 import { useEffect, useState } from 'react';
-import { firebaseServices } from '../firebase/client';
-import { setServerTimeOffset } from '../firebase/clock';
-import { hydrateRoom } from '../multiplayer/hydrate';
+import { supabaseServices } from '../supabase/client';
+import { serverNow, syncServerClock } from '../supabase/clock';
+import { getRoomSnapshot, setPresenceOffline, subscribeToRoom, updatePresence } from '../multiplayer/supabaseRepository';
 import type { ConnectionState, Room } from '../types';
 
 const initialConnection: ConnectionState = { connected: false, syncing: false, localRevision: 0, serverRevision: 0, pingMs: null, lastUpdateAt: null, errors: [] };
@@ -14,30 +13,55 @@ export const useOnlineRoom = (code: string | null, playerId?: string, uid?: stri
   useEffect(() => {
     setRoom(null);
     setConnection(initialConnection);
-    const services = firebaseServices();
-    if (!services || !code) return;
-    const connectedUnsubscribe = onValue(ref(services.database, '.info/connected'), (snapshot) => setConnection((current) => ({ ...current, connected: snapshot.val() === true })), (error) => setConnection((current) => ({ ...current, lastUpdateAt: Date.now(), errors: [...current.errors.slice(-4), error.message] })));
-    const clockUnsubscribe = onValue(ref(services.database, '.info/serverTimeOffset'), (snapshot) => setServerTimeOffset(Number(snapshot.val() ?? 0)));
+    if (!supabaseServices() || !code) return undefined;
+    let cancelled = false;
+    let reloadInFlight = false;
     const startedAt = performance.now();
-    const roomUnsubscribe = onValue(ref(services.database, `rooms/${code}`), (snapshot) => {
+    const reportError = (error: unknown): void => {
+      const message = error instanceof Error ? error.message : 'No se pudo sincronizar la sala.';
+      if (cancelled) return;
+      setConnection((current) => ({ ...current, connected: false, syncing: false, lastUpdateAt: Date.now(), errors: [...current.errors.slice(-4), message] }));
+    };
+    const reload = async (): Promise<void> => {
+      if (reloadInFlight || cancelled) return;
+      reloadInFlight = true;
+      setConnection((current) => ({ ...current, syncing: true }));
       try {
-        const value = snapshot.val() as Room | null;
-        const next = value ? hydrateRoom(value) : null;
+        const next = await getRoomSnapshot(code);
+        if (cancelled) return;
         setRoom(next);
-        setConnection((current) => ({ ...current, syncing: false, serverRevision: next?.canonical?.revision ?? 0, pingMs: Math.round(performance.now() - startedAt), lastUpdateAt: Date.now() }));
+        setConnection((current) => ({
+          ...current,
+          connected: true,
+          syncing: false,
+          serverRevision: next?.canonical?.revision ?? 0,
+          pingMs: Math.round(performance.now() - startedAt),
+          lastUpdateAt: Date.now(),
+        }));
       } catch (error) {
-        setRoom(null);
-        setConnection((current) => ({ ...current, syncing: false, lastUpdateAt: Date.now(), errors: [...current.errors.slice(-4), error instanceof Error ? error.message : 'La sala contiene datos inválidos.'] }));
+        reportError(error);
+      } finally {
+        reloadInFlight = false;
       }
-    }, (error) => setConnection((current) => ({ ...current, syncing: false, lastUpdateAt: Date.now(), errors: [...current.errors.slice(-4), error.message] })));
+    };
+    void syncServerClock().then(reload).catch(reportError);
+    const unsubscribe = subscribeToRoom(code, () => { void reload(); }, reportError);
     const heartbeat = playerId && uid && connectionId
       ? window.setInterval(() => {
-        void update(ref(services.database, `rooms/${code}/presence/${playerId}/${connectionId}`), { uid, connected: true, lastSeen: serverTimestamp() }).catch((error: unknown) => {
-          setConnection((current) => ({ ...current, errors: [...current.errors.slice(-4), error instanceof Error ? error.message : 'No se pudo actualizar la presencia.'] }));
-        });
-      }, 5000)
+        void updatePresence(code, playerId, connectionId, serverNow()).catch(reportError);
+      }, 5_000)
       : undefined;
-    return () => { connectedUnsubscribe(); clockUnsubscribe(); roomUnsubscribe(); if (heartbeat !== undefined) window.clearInterval(heartbeat); };
+    const markOffline = (): void => {
+      if (playerId && connectionId) void setPresenceOffline(code, playerId, connectionId, serverNow()).catch(() => undefined);
+    };
+    window.addEventListener('pagehide', markOffline);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      if (heartbeat !== undefined) window.clearInterval(heartbeat);
+      window.removeEventListener('pagehide', markOffline);
+      markOffline();
+    };
   }, [attempt, code, connectionId, playerId, uid]);
   return { room, connection, retry: () => setAttempt((current) => current + 1) };
 };
