@@ -9,6 +9,14 @@ export const APP_VERSION = packageMetadata.version;
 
 export const RELEASE_NOTES: readonly ReleaseNotes[] = [
   {
+    version: '1.2.0',
+    changes: [
+      'El multijugador deja Firebase y pasa a Supabase Auth anónimo, PostgreSQL y Realtime con snapshots completos y reconciliación segura.',
+      'Salas, presencia, reconexión, leases del coordinador, cola de comandos y recibos se procesan con RPCs atómicas, RLS y control de versiones.',
+      'La migración incluye validación de permisos, límites de cola, idempotencia y recuperación de asientos sin exponer secretos al navegador.',
+    ],
+  },
+  {
     version: '1.1.2',
     changes: [
       'Kit Carlson y Jesse Jones ya permiten elegir el robo correctamente; las habilidades de Lucky Duke, Suzy Lafayette, El Gringo y Sid Ketchum quedan cubiertas por el motor.',
