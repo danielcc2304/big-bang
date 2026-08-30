@@ -77,6 +77,24 @@ describe('combate y personajes', () => {
     expect(state.logs.some((entry) => entry.effect?.card.id === heart.id && entry.effect.success)).toBe(true);
   });
 
+  it('Barril jugado desde la mano se activa en el siguiente BANG!', () => {
+    let state = playPhase(testState(), 'p1');
+    const barrel = makeCard('BARREL', 'played-barrel');
+    const heart = makeCard('BEER', 'played-barrel-heart', 'HEARTS');
+    state = { ...state, deck: [heart, ...state.deck] };
+    state = patchPlayer(state, 'p1', { hand: [barrel] });
+    state = run(state, command(state, 'p1', 'PLAY_CARD', { cardId: barrel.id }));
+    expect(state.players[1]!.equipment.barrel?.id).toBe(barrel.id);
+
+    const bang = makeCard('BANG', 'played-barrel-bang');
+    state = playPhase(patchPlayer(state, 'p0', { hand: [bang] }));
+    state = run(state, command(state, 'p0', 'PLAY_CARD', { cardId: bang.id, targetPlayerId: 'p1' }));
+
+    expect(state.players[1]!.lives).toBe(state.players[1]!.maxLives);
+    expect(state.reaction).toBeNull();
+    expect(state.logs.some((entry) => entry.effect?.card.id === heart.id && entry.effect.success)).toBe(true);
+  });
+
   it('Barril fallido descarta el juicio y deja pendiente un Fallaste!', () => {
     let state = playPhase(testState());
     const bang = makeCard('BANG', 'barrel-failed-bang'); const barrel = makeCard('BARREL', 'barrel-failed'); const club = makeCard('BEER', 'barrel-club', 'CLUBS');

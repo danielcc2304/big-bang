@@ -25,6 +25,32 @@ describe('Supabase state hydration', () => {
     expect(hydrated.logs.at(-1)?.effect).toEqual(withEffect.logs.at(-1)?.effect);
   });
 
+  it('mantiene el Barril equipado y operativo tras hidratar el estado online', () => {
+    let game = createGame(setups, 43);
+    const bang = makeCard('BANG', 'online-barrel-bang');
+    const barrel = makeCard('BARREL', 'online-barrel');
+    const heart = makeCard('BEER', 'online-barrel-heart', 'HEARTS');
+    game = {
+      ...game,
+      deck: [heart, ...game.deck],
+      turn: { ...game.turn, currentPlayerId: 'human', phase: 'PLAY' },
+      players: game.players.map((player) => player.id === 'human'
+        ? { ...player, hand: [bang] }
+        : player.id === 'bot-1'
+          ? { ...player, equipment: { ...player.equipment, barrel } }
+          : player),
+    };
+
+    const hydrated = hydrateGameState(JSON.parse(JSON.stringify(game)) as GameState);
+    const result = applyCommand(hydrated, command(hydrated, 'human', 'PLAY_CARD', { cardId: bang.id, targetPlayerId: 'bot-1' }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.reaction).toBeNull();
+    expect(result.state.players.find((player) => player.id === 'bot-1')?.equipment.barrel?.id).toBe(barrel.id);
+    expect(result.state.logs.some((entry) => entry.effect?.card.id === heart.id && entry.effect.success)).toBe(true);
+  });
+
   it('restores values omitted by a partial realtime payload from a fresh game', () => {
     const game = createGame(setups, 42);
     const remoteState = {
