@@ -160,6 +160,39 @@ describe('GameBoard', () => {
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'PLAY_CARD', payload: { cardId: cat.id, targetPlayerId: target.id, targetCardId: barrel.id } }));
   });
 
+  it('permite a Sid Ketchum elegir exactamente las dos cartas que descarta', () => {
+    const base = createGame(setups, 47, 'OFFICIAL');
+    const hand = base.deck.slice(0, 3);
+    const viewer = base.players[0]!;
+    const state = {
+      ...base,
+      deck: base.deck.slice(3),
+      players: base.players.map((player) => player.id === viewer.id ? { ...player, character: characterByName('Sid Ketchum'), hand, lives: 2 } : player),
+      turn: { ...base.turn, currentPlayerId: viewer.id, phase: 'PLAY' as const },
+    };
+    const dispatch = vi.fn(() => true);
+
+    render(<GameBoard state={state} viewerId={viewer.id} error={null} dispatch={dispatch} onExit={() => undefined} />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Curar' }).at(-1)!);
+    const dialog = screen.getByRole('dialog', { name: 'Elige 2 cartas para descartar' });
+    for (const card of hand.slice(1)) fireEvent.click(within(dialog).getByRole('button', { name: new RegExp(`${CARD_CATALOG[card.name].label}, ${card.rank}`) }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Descartar 2/2 y curar' }));
+
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'USE_CHARACTER_ABILITY', payload: { cardIds: [hand[1]!.id, hand[2]!.id] } }));
+  });
+
+  it('mantiene el resultado y revela todos los roles con la animación de victoria', () => {
+    const base = createGame(setups, 53, 'OFFICIAL');
+    const state = { ...base, winner: 'LAW' as const, turn: { ...base.turn, phase: 'GAME_OVER' as const } };
+
+    render(<GameBoard state={state} viewerId={setups[0]!.id} error={null} dispatch={() => true} onExit={() => undefined} />);
+    const dialog = screen.getByRole('dialog', { name: 'La ley prevalece' });
+
+    expect(dialog).toHaveTextContent('ROLES REVELADOS');
+    expect(dialog.querySelectorAll('.role-reveal-card')).toHaveLength(setups.length);
+    for (const player of state.players) expect([...dialog.querySelectorAll(`.role-reveal-card.role-${player.role.toLowerCase()}`)].some((card) => card.textContent?.includes(player.name))).toBe(true);
+  });
+
   it('envía una señal explícita al aceptar el daño de un BANG online', () => {
     const base = createGame(setups, 43);
     const viewer = base.players[0]!;

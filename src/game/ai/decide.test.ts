@@ -104,6 +104,39 @@ describe('estrategia de objetivos de la IA', () => {
     expect(decision).toMatchObject({ type: 'PLAY_CARD', payload: { cardId: duel.id, targetPlayerId: 'p0' } });
   });
 
+  it('elige un objetivo de BANG que esté dentro de alcance', () => {
+    let state = playPhase(fourPlayerRoles(), 'p2');
+    const bang = makeCard('BANG', 'reachable-bang');
+    state = patchPlayer(state, 'p2', { hand: [bang] });
+
+    const decision = decideAiCommand(state, 'p2', initialKnowledge(state, 'p2'));
+
+    expect(decision).toMatchObject({ type: 'PLAY_CARD', payload: { cardId: bang.id } });
+    if (decision?.type === 'PLAY_CARD') expect(decision.payload.targetPlayerId).not.toBe('p0');
+  });
+
+  it('nunca intenta encarcelar al Sheriff y busca un objetivo legal', () => {
+    let state = playPhase(fourPlayerRoles(), 'p1');
+    const jail = makeCard('JAIL', 'legal-jail');
+    state = patchPlayer(state, 'p1', { hand: [jail] });
+
+    const decision = decideAiCommand(state, 'p1', initialKnowledge(state, 'p1'));
+
+    expect(decision?.type).toBe('PLAY_CARD');
+    if (decision?.type === 'PLAY_CARD') expect(decision.payload.targetPlayerId).not.toBe('p0');
+  });
+
+  it('no sustituye un arma mejor por otra de menor alcance', () => {
+    let state = playPhase(fourPlayerRoles(), 'p1');
+    const schofield = makeCard('SCHOFIELD', 'weak-upgrade');
+    const bang = makeCard('BANG', 'after-weapon');
+    state = patchPlayer(state, 'p1', { hand: [schofield, bang], equipment: { ...state.players[1]!.equipment, weapon: makeCard('WINCHESTER', 'current-winchester') } });
+
+    const decision = decideAiCommand(state, 'p1', initialKnowledge(state, 'p1'));
+
+    expect(decision).toMatchObject({ type: 'PLAY_CARD', payload: { cardId: bang.id } });
+  });
+
   it('la ley decide por sospechas públicas y no por el rol secreto real', () => {
     let state = playPhase(fourPlayerRoles(), 'p0');
     const duel = makeCard('DUEL', 'suspicion-duel');

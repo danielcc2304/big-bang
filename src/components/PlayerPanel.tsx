@@ -7,13 +7,14 @@ interface PlayerPanelProps {
   readonly state: GameState;
   readonly viewerId: string;
   readonly targetable: boolean;
+  readonly revealRoles?: boolean;
   readonly onSelect: () => void;
   readonly onInspect: () => void;
 }
 
-export const PlayerPanel = ({ player, state, viewerId, targetable, onSelect, onInspect }: PlayerPanelProps) => {
+export const PlayerPanel = ({ player, state, viewerId, targetable, revealRoles = false, onSelect, onInspect }: PlayerPanelProps) => {
   const active = state.turn.currentPlayerId === player.id;
-  const role = player.role === 'SHERIFF' || player.id === viewerId || !player.alive ? player.role : 'SECRET';
+  const role = revealRoles || player.role === 'SHERIFF' || player.id === viewerId || !player.alive ? player.role : 'SECRET';
   const equipment = Object.values(player.equipment).filter((card): card is Card => card !== null);
   return (
     <article className={`player-panel ${active ? 'active' : ''} ${player.role === 'SHERIFF' ? 'sheriff' : ''} ${!player.alive ? 'dead' : ''} ${targetable ? 'targetable' : ''}`}>
