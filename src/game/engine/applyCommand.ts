@@ -54,23 +54,40 @@ const createReaction = (state: GameState, type: Reaction['type'], sourceId: stri
   turn: { ...state.turn, phase: 'WAITING_REACTION' },
 });
 
-const barrelCheck = (state: GameState, target: Player, requiredSuccesses: number): { readonly state: GameState; readonly successes: number } => {
-  const checks = (target.equipment.barrel ? 1 : 0) + (target.character.name === 'Jourdonnais' ? 1 : 0);
+type BarrelJudgementSource = 'BARREL' | 'JOURDONNAIS';
+
+const barrelSources = (target: Player): readonly BarrelJudgementSource[] => [
+  ...(target.equipment.barrel ? ['BARREL' as const] : []),
+  ...(target.character.name === 'Jourdonnais' ? ['JOURDONNAIS' as const] : []),
+];
+
+const barrelCheck = (state: GameState, targetId: string, requiredSuccesses: number): { readonly state: GameState; readonly successes: number } => {
+  const initialTarget = playerById(state, targetId);
+  const sources = initialTarget ? barrelSources(initialTarget) : [];
   let next = state;
   let successes = 0;
-  for (let index = 0; index < checks && successes < requiredSuccesses; index += 1) {
+  for (const source of sources) {
+    if (successes >= requiredSuccesses) break;
+    // Resolve the target from the latest canonical state for every check. A
+    // command can be replayed by the online coordinator after another
+    // immutable state transition, so this judgement must never use a UI
+    // snapshot as its source of truth.
+    const target = playerById(next, targetId);
+    if (!target?.alive) break;
     const draw = drawJudgement(next, target, (card) => card.suit === 'HEARTS');
     const card = draw.card;
     next = draw.state;
-    if (card) {
-      const success = card.suit === 'HEARTS';
-      if (success) successes += 1;
-      const source = index === 0 && target.equipment.barrel ? 'el Barril' : 'la habilidad de Jourdonnais';
-      const revealed = draw.lucky ? ` revela ${draw.revealed.map(cardResult).join(' y ')} y elige ${cardResult(card)}` : ` desenfunda ${cardResult(card)}`;
-      next = log(next, `${target.name}${revealed} con ${source}: ${success ? 'evita un impacto de BANG!' : 'no consigue protegerse'}.`, success ? 'ACTION' : 'DANGER', {
-        kind: 'JUDGEMENT', playerId: target.id, card, success, headline: success ? '¡SE SALVA!' : 'EL BARRIL FALLA',
-      });
+    if (!card) {
+      next = log(next, `${target.name} intenta ${source === 'BARREL' ? 'el Barril' : 'la habilidad de Jourdonnais'}, pero no quedan cartas para desenfundar.`, 'DANGER');
+      break;
     }
+    const success = card.suit === 'HEARTS';
+    if (success) successes += 1;
+    const sourceLabel = source === 'BARREL' ? 'el Barril' : 'la habilidad de Jourdonnais';
+    const revealed = draw.lucky ? ` revela ${draw.revealed.map(cardResult).join(' y ')} y elige ${cardResult(card)}` : ` desenfunda ${cardResult(card)}`;
+    next = log(next, `${target.name}${revealed} con ${sourceLabel}: ${success ? 'evita un impacto de BANG!' : 'no consigue protegerse'}.`, success ? 'ACTION' : 'DANGER', {
+      kind: 'JUDGEMENT', playerId: target.id, card, success, headline: success ? '¡SE SALVA!' : source === 'BARREL' ? 'EL BARRIL FALLA' : 'JOURDONNAIS FALLA',
+    });
   }
   return { state: next, successes };
 };
@@ -222,7 +239,7 @@ const playCard = (state: GameState, command: Extract<GameCommand, { type: 'PLAY_
     const updated = playerById(next, player.id)!;
     next = replacePlayer(next, { ...updated, bangsPlayedThisTurn: updated.bangsPlayedThisTurn + 1 });
     const requiredSuccesses = player.character.name === 'Slab the Killer' ? 2 : 1;
-    const check = barrelCheck(next, target, requiredSuccesses);
+    const check = barrelCheck(next, target.id, requiredSuccesses);
     const required = requiredSuccesses - check.successes;
     next = required <= 0 ? check.state : createReaction(check.state, 'BANG', player.id, target.id, required, command.createdAt);
     return { ok: true, state: log(next, `${player.name} juega BANG! contra ${target.name}.`, 'ACTION') };
