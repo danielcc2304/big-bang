@@ -13,16 +13,14 @@ npm install
 npm run dev
 ```
 
-La aplicación local se abre en `http://localhost:5173`. El modo contra IA funciona sin Firebase.
-
-Comandos disponibles:
+La aplicación local se abre en `http://localhost:5173`. El modo contra IA funciona sin configurar un proyecto Supabase.
 
 ```bash
-npm run dev          # desarrollo
-npm test             # tests Vitest una vez
-npm run test:watch   # tests en modo interactivo
-npm run build        # TypeScript estricto + bundle de producción
-npm run lint         # ESLint
+npm run dev              # desarrollo
+npm test -- --run        # tests Vitest
+npm run lint             # ESLint
+npm run build            # TypeScript estricto + bundle de producción
+npm run validate:supabase # contrato SQL, RLS y RPCs
 ```
 
 ## Arquitectura
@@ -30,18 +28,15 @@ npm run lint         # ESLint
 ```text
 src/
   components/       UI React y superficies de interacción
-  firebase/         inicialización del SDK modular
-  game/
-    ai/              heurísticas que generan comandos legales
-    cards/           catálogo y mazo base de 80 cartas
-    characters/      16 personajes del juego base
-    engine/          applyCommand, setup, muerte e invariantes
-    rules/           roles, distancia y victoria
-  hooks/             sesión local, sala online y coordinador
-  multiplayer/       salas, identidad, comandos, lease y failover
-  styles/            sistema responsive western
-  types/             contratos de dominio y multiplayer
+  game/             motor determinista, cartas, personajes, reglas e IA
+  hooks/            sesión local, sala online y automatización
+  multiplayer/      salas, identidad, comandos, lease y failover
+  supabase/         cliente, autenticación anónima y reloj del servidor
+  styles/           sistema responsive western
+  types/            contratos de dominio y multiplayer
   utils/             RNG determinista, IDs y Web Audio
+supabase/
+  migrations/       esquema, RLS y funciones RPC versionadas
 ```
 
 El motor es TypeScript puro. Toda acción entra como `GameCommand` con `commandId`, `playerId`, `expectedRevision` y `createdAt`:
@@ -50,84 +45,52 @@ El motor es TypeScript puro. Toda acción entra como `GameCommand` con `commandI
 applyCommand(estado, comando) → estado nuevo o error sin mutación
 ```
 
-Antes de aceptar un estado se comprueban invariantes: unicidad de cartas, jugador de turno vivo, vidas válidas y consistencia de Almacén. Los últimos `commandId` aplicados se conservan en el estado para que los reintentos sean idempotentes.
+Antes de aceptar un estado se comprueban invariantes: unicidad de cartas, jugador de turno vivo, vidas válidas y consistencia de Almacén. Los últimos `commandId` aplicados se conservan para que los reintentos sean idempotentes.
 
-Las secuencias críticas no dependen de promesas abiertas en un navegador. `reaction`, `storeState` y `multiAction` contienen el progreso completo de BANG!/Fallaste!, Duelo, Indios, Gatling y Almacén.
+## Multijugador con Supabase
 
-## Multijugador
+Supabase sustituye por completo a Firebase. El motor conserva una copia canónica de `GameState` en `public.rooms.state`, mientras PostgreSQL controla las fronteras de concurrencia:
 
-Firebase mantiene una sala con:
+- `rooms`: estado canónico JSONB y versión monotónica para compare-and-swap;
+- `room_members`: propiedad de cada asiento y autorización de sala;
+- `room_commands`: cola limitada de comandos con slot único e idempotencia;
+- `room_command_receipts`: confirmaciones `APPLIED`/`REJECTED`;
+- `room_presence`: heartbeat persistente por dispositivo y limpieza por caducidad;
+- `seat_proofs` y `reconnect_claims`: recuperación sin exponer hashes al navegador.
 
-- `canonical`: única copia autoritativa de `GameState`;
-- `commands`: cola de comandos de clientes;
-- `coordinator`: `coordinatorId`, `coordinatorEpoch`, `leaseUntil` y `heartbeat`;
-- `seats`: propietario autenticado por asiento;
-- `players`: presencia y última actividad.
+El navegador solo puede leer salas autorizadas. Las escrituras pasan por RPC `SECURITY DEFINER` con `search_path` vacío: creación y unión atómica, lease del coordinador, CAS del estado, cola de comandos, reconexión y finalización. Supabase Realtime publica cambios de las tablas y el cliente recarga el snapshot completo, por lo que un evento parcial nunca sustituye al estado local.
 
-Los hashes de recuperación viven fuera de la sala, en `seatProofs`, con lectura limitada al propietario y al coordinador. Las solicitudes de cambio de dispositivo se validan por el coordinador y se eliminan al usarse.
+La identidad se crea con `supabase.auth.signInAnonymously()`. Activa el proveedor Anonymous en el panel de Supabase antes de probar salas. El heartbeat y la marca `pagehide` sustituyen a `onDisconnect`; el coordinador considera huérfana una conexión después de 12 segundos.
 
-Los clientes no escriben arbitrariamente el estado canónico. El coordinador procesa cada comando dentro de una transacción RTDB y valida lease, epoch y revisión. Si desaparece, un humano conectado puede adquirir atómicamente el lease vencido; el coordinador antiguo queda cercado por el epoch y no puede seguir escribiendo.
+## Configurar Supabase
 
-La IA usa exactamente el mismo canal de comandos. Su conocimiento separado solo contiene el Sheriff público y puntuaciones de sospecha; no consulta roles secretos ajenos.
-
-## Configurar Firebase
-
-1. Crea un proyecto en [Firebase Console](https://console.firebase.google.com/).
-2. Añade una aplicación Web al proyecto.
-3. En **Build → Authentication → Sign-in method**, activa **Anonymous**. La identidad anónima persistente protege la propiedad del asiento sin pedir una cuenta al jugador.
-4. En **Build → Realtime Database**, crea una base. Elige la región más cercana a tus jugadores.
-5. Copia `.env.example` como `.env.local`.
-6. En **Project settings → General → Your apps → SDK setup and configuration**, completa:
+1. Crea un proyecto en [Supabase](https://supabase.com/dashboard).
+2. En **Authentication → Providers**, activa **Anonymous sign-ins**.
+3. Copia `.env.example` como `.env.local` y completa la URL y la clave pública del proyecto:
 
 ```dotenv
-VITE_FIREBASE_API_KEY=...
-VITE_FIREBASE_AUTH_DOMAIN=tu-proyecto.firebaseapp.com
-VITE_FIREBASE_DATABASE_URL=https://tu-proyecto-default-rtdb.europe-west1.firebasedatabase.app
-VITE_FIREBASE_PROJECT_ID=tu-proyecto
-VITE_FIREBASE_APP_ID=...
+VITE_SUPABASE_URL=https://tu-proyecto.supabase.co
+VITE_SUPABASE_ANON_KEY=tu-anon-o-publishable-key
 ```
 
-7. Instala Firebase CLI si no lo tienes e inicia sesión:
+4. En **SQL Editor**, ejecuta [supabase/migrations/0001_online.sql](supabase/migrations/0001_online.sql). La migración crea tablas, índices, RLS, RPCs y publica las tablas en `supabase_realtime`.
+5. Comprueba el contrato sin credenciales con `npm run validate:supabase`.
 
-```bash
-npm install -g firebase-tools
-firebase login
-firebase use --add
-```
-
-8. Publica `firebase.database.rules.json` desde la consola de Realtime Database o con:
-
-```bash
-firebase deploy --only database
-```
-
-Para usar el comando anterior puedes crear un `firebase.json` local que apunte a las reglas:
-
-```json
-{
-  "database": { "rules": "firebase.database.rules.json" }
-}
-```
-
-No uses reglas globales `.read: true` / `.write: true`. No añadas cuentas de servicio, claves privadas ni credenciales Admin al frontend. `.env`, `.firebase/` y variantes locales ya están ignoradas por Git.
+No pongas una `service_role` key en variables `VITE_*`. La clave pública solo permite las operaciones que las políticas y RPCs autorizan.
 
 ### Reconexión
 
-Al reservar un asiento se crea un secreto de recuperación largo. Firebase solo almacena su SHA-256 en una rama protegida; el secreto queda en el dispositivo y también puede copiarse desde el lobby para recuperarlo en otro. Conocer el nombre de un jugador no permite reclamar su asiento. La solicitud se valida con el hash y puede procesarse aunque no quede ningún coordinador activo; el dispositivo original puede volver directamente gracias a su identidad anónima persistente.
+Al reservar un asiento se crea un secreto largo en el dispositivo. Supabase solo conserva su SHA-256 en `seat_proofs`; la función `claim_reconnect` compara el hash dentro de una transacción, comprueba que no existe una conexión viva y transfiere el asiento a la nueva identidad anónima. El hash nunca se selecciona desde el navegador.
 
 ## Despliegue en Vercel
 
-1. Sube el repositorio a GitHub, GitLab o Bitbucket.
-2. En Vercel, elige **Add New → Project** e importa el repositorio.
-3. Vercel detectará Vite. Los valores esperados son:
-   - Build command: `npm run build`
-   - Output directory: `dist`
-   - Install command: `npm install`
-4. En **Project Settings → Environment Variables**, añade las cinco variables `VITE_FIREBASE_*` anteriores para Production, Preview y Development según corresponda.
-5. Despliega. `vercel.json` ya redirige rutas e invitaciones a `index.html`.
-6. Añade el dominio final de Vercel en **Firebase Authentication → Settings → Authorized domains**.
+1. Importa el repositorio en Vercel.
+2. Usa `npm run build` como comando de compilación y `dist` como salida.
+3. En **Project Settings → Environment Variables**, añade `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` para Production, Preview y Development.
+4. Añade los dominios de Vercel permitidos en **Supabase → Authentication → URL Configuration**.
+5. Ejecuta la migración SQL en el mismo proyecto Supabase que utilizará Production y Preview.
 
-No subas `.env.local` a Vercel ni al repositorio; usa siempre el panel de variables.
+No subas `.env.local` al repositorio; `.env*` locales están ignorados por Git.
 
 ## Reglas implementadas
 
@@ -138,38 +101,22 @@ No subas `.env.local` a Vercel ni al repositorio; usa siempre el panel de variab
 - BANG!, Fallaste!, Cerveza, Saloon, Diligencia, Wells Fargo, Pánico, Cat Balou, Indios, Gatling, Duelo y Almacén;
 - Prisión, Dinamita, Barril, Mustang, Appaloosa y las cinco armas;
 - Volcanic como carta equipada real y robable/descartable;
-- recompensa por eliminar Forajido y penalización del Sheriff al eliminar Ayudante;
-- Vulture Sam, Suzy Lafayette, Bart Cassidy, El Gringo, Calamity Janet, Slab the Killer, Willy the Kid y habilidades de preparación/draw activas;
+- habilidades de personajes, elecciones simultáneas y automatización de IA por el mismo canal de comandos;
 - victoria de la Ley, Forajidos y Renegado;
 - selector explícito de cartas a conservar al finalizar un turno humano.
 
-## Tests
-
-La suite cubre 89 pruebas automatizadas de motor, concurrencia, hidratación y reglas, entre ellas roles, barajado, Sheriff, BANG/Fallaste, Slab, Calamity, Willy, Volcanic, Barril, Prisión, Dinamita, Pánico/Cat Balou sobre Volcanic, Duelo, Indios, Gatling, ciclo completo de Almacén, doble tap, carrera por una carta, descarte, muerte, recompensas, Vulture Sam, victoria, reconexión, comandos duplicados, revisión antigua, invariantes, failover del coordinador y 30 simulaciones largas de partidas completas controladas por IA.
-
-## Auditoria de robustez online
-
-El flujo online incluye lease de coordinador con epoch, renovacion estable y toma de control tras caducidad; heartbeat por conexion, limpieza de conexiones huerfanas y automatizacion de humanos desconectados solo despues de la gracia; reclamacion de asiento con hash incluso cuando no queda coordinador activo; cola limitada a 100 slots RTDB, validacion de comandos, reintentos idempotentes y recibos `APPLIED`/`REJECTED`; transiciones monotónicas `LOBBY` -> `PLAYING` -> `ENDED`; y reglas adversariales ejecutables en el emulador local.
-
-Validaciones recomendadas antes de publicar:
+## Validación
 
 ```bash
-npm run validate:rules
-npm run test:rules
+npm run validate:supabase
 npm test -- --run
 npm run lint
 npm run build
 npm audit --audit-level=high
 ```
 
-## Decisiones frente al HTML legado
+Las pruebas cubren motor, IA, cartas, habilidades, hidratación, comandos, leases, reintentos, reconexión y las invariantes de partidas completas. No dependen de un proyecto Supabase remoto: las RPCs se prueban mediante adaptadores simulados y el SQL se valida de forma estática en CI.
 
-El HTML `bang_saloon_online_v4_13_self_healing.html` se usó como inventario funcional: cartas, personajes, mesa, audio, modos de juego y recuperaciones. No se portaron sus variables globales, renderizado imperativo, esperas `await` en RAM, polling ni escrituras amplias del estado. Cuando había conflicto, se priorizó la regla oficial solicitada; en particular, una Volcanic equipada nunca se infiere por `weaponRange > 1`.
+## Limitación de seguridad competitiva
 
-## Limitaciones conocidas
-
-- La variante online permite que todos los humanos elijan simultáneamente entre dos personajes aleatorios; las elecciones concurrentes se serializan de forma autoritativa antes de repartir las manos.
-- Las habilidades con decisión durante el robo de Jesse Jones, Kit Carlson y Pedro Ramirez tienen estructura de conocimiento preparada, pero la primera IA usa el robo estándar. Las habilidades automáticas y las activas de combate sí están modeladas.
-- Las reglas de Firebase proporcionadas son un punto de partida endurecido para autenticación anónima y autoridad de coordinador. Antes de operar una comunidad pública conviene añadir App Check, límites de tamaño/frecuencia y limpieza automática de salas terminadas.
-- En el despliegue exclusivamente cliente descrito aquí, los miembros autenticados de una sala reciben el estado canónico completo para poder asumir el lease. La interfaz oculta manos y roles ajenos, pero un usuario que inspeccione directamente el tráfico podría verlos. Un entorno competitivo con protección anti-trampas requiere mover el procesador de comandos a Cloud Functions o a un servidor de confianza y publicar vistas privadas por UID.
-- Los sonidos se sintetizan con Web Audio; no se incluyen muestras realistas externas.
+El cliente necesita recibir el estado canónico completo para que cualquier humano pueda asumir el lease tras una caída. La interfaz oculta manos y roles ajenos, pero un usuario avanzado podría inspeccionar el tráfico. Para un entorno competitivo conviene mover el coordinador a un servidor de confianza y publicar vistas privadas por UID.

@@ -1,31 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const databaseMocks = vi.hoisted(() => ({
-  get: vi.fn(),
-  onDisconnectUpdate: vi.fn(),
-  ref: vi.fn((_database: unknown, path: string) => path),
-  runTransaction: vi.fn(),
-  set: vi.fn(),
-  update: vi.fn(),
+const repositoryMocks = vi.hoisted(() => ({
+  joinRoomRecord: vi.fn(),
+  saveSeatProof: vi.fn(),
+  updatePresence: vi.fn(),
+  claimReconnect: vi.fn(),
+  getRoomSnapshot: vi.fn(),
+  enqueueCommandRecord: vi.fn(),
 }));
 
-vi.mock('firebase/database', () => ({
-  get: databaseMocks.get,
-  onDisconnect: vi.fn(() => ({ update: databaseMocks.onDisconnectUpdate })),
-  onValue: vi.fn(),
-  push: vi.fn(() => ({ key: 'command-key' })),
-  ref: databaseMocks.ref,
-  runTransaction: databaseMocks.runTransaction,
-  serverTimestamp: vi.fn(() => 1234),
-  set: databaseMocks.set,
-  update: databaseMocks.update,
-}));
-
-vi.mock('../firebase/client', () => ({
-  ensureAnonymousUser: vi.fn(() => Promise.resolve({ uid: 'tablet-user-1234567890' })),
-  firebaseServices: vi.fn(() => ({ database: {} })),
-}));
-
+vi.mock('../supabase/client', () => ({ ensureAnonymousUser: vi.fn(() => Promise.resolve({ id: 'tablet-user-1234567890' })) }));
+vi.mock('../supabase/clock', () => ({ serverNow: vi.fn(() => 1_000), syncServerClock: vi.fn(() => Promise.resolve()) }));
+vi.mock('./supabaseRepository', () => repositoryMocks);
 vi.mock('./identity', () => ({
   createReconnectToken: vi.fn(() => 'reconnect-token'),
   hashReconnectToken: vi.fn(() => Promise.resolve('a'.repeat(64))),
@@ -35,86 +21,30 @@ vi.mock('./identity', () => ({
 
 import { joinRoom } from './roomService';
 
-describe('joinRoom', () => {
+describe('joinRoom con Supabase', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    databaseMocks.get.mockResolvedValue({
-      val: () => ({
-        code: 'ABC123',
-        status: 'LOBBY',
-        createdAt: 1,
-        hostUid: 'host-user',
-        maxPlayers: 4,
-        characterMode: 'OFFICIAL',
-        seats: {
-          0: {
-            number: 0,
-            playerId: 'player-host',
-            ownerUid: 'host-user',
-            reconnectHash: null,
-            isBot: false,
-            joinedAt: 1,
-          },
-        },
-        players: {},
-        coordinator: {
-          coordinatorId: 'host-user',
-          coordinatorEpoch: 1,
-          leaseUntil: Date.now() + 10_000,
-          heartbeat: Date.now(),
-        },
-        canonical: null,
-        commands: {},
-      }),
-    });
-    databaseMocks.set.mockResolvedValue(undefined);
-    databaseMocks.update.mockResolvedValue(undefined);
-    databaseMocks.onDisconnectUpdate.mockResolvedValue(undefined);
+    repositoryMocks.joinRoomRecord.mockResolvedValue({ existing: false, playerId: 'player-tablet-use', seat: 1 });
+    repositoryMocks.saveSeatProof.mockResolvedValue(undefined);
+    repositoryMocks.updatePresence.mockResolvedValue(undefined);
   });
 
-  it('reserva un asiento hijo compatible con las reglas de Firebase', async () => {
-    databaseMocks.runTransaction.mockImplementation((path: string, updateSeat: (seat: unknown) => unknown) => {
-      const nextSeat = updateSeat(path.endsWith('/0') ? { ownerUid: 'host-user' } : null);
-      return Promise.resolve({
-        committed: nextSeat !== undefined,
-        snapshot: { val: () => nextSeat },
-      });
-    });
+  it('reserva un asiento de forma atómica y guarda la prueba de recuperación', async () => {
+    const identity = await joinRoom('abc123', 'Tablet');
+
+    expect(identity.playerId).toBe('player-tablet-use');
+    expect(repositoryMocks.joinRoomRecord).toHaveBeenCalledWith('ABC123', 'player-tablet-use', 'Tablet', 1_000);
+    expect(repositoryMocks.saveSeatProof).toHaveBeenCalledWith('ABC123', 1, 'a'.repeat(64));
+    expect(repositoryMocks.updatePresence).toHaveBeenCalledWith('ABC123', 'player-tablet-use', expect.any(String), 1_000);
+  });
+
+  it('no permite consumir un segundo asiento con la misma identidad anónima', async () => {
+    repositoryMocks.joinRoomRecord.mockResolvedValue({ existing: true, playerId: 'player-tablet-use', seat: 0 });
 
     const identity = await joinRoom('abc123', 'Tablet');
 
     expect(identity.playerId).toBe('player-tablet-use');
-    expect(databaseMocks.runTransaction).toHaveBeenNthCalledWith(
-      1,
-      'rooms/ABC123/seats/0',
-      expect.any(Function),
-      { applyLocally: false },
-    );
-    expect(databaseMocks.runTransaction).toHaveBeenNthCalledWith(
-      2,
-      'rooms/ABC123/seats/1',
-      expect.any(Function),
-      { applyLocally: false },
-    );
-    expect(databaseMocks.set).toHaveBeenCalledWith(
-      'seatProofs/ABC123/1',
-      'a'.repeat(64),
-    );
-  });
-
-  it('no permite que el mismo usuario anónimo consuma un segundo asiento', async () => {
-    databaseMocks.get.mockResolvedValue({
-      val: () => ({
-        code: 'ABC123', status: 'LOBBY', createdAt: 1, hostUid: 'host-user', maxPlayers: 4, characterMode: 'OFFICIAL',
-        seats: { 0: { number: 0, playerId: 'player-tablet-use', ownerUid: 'tablet-user-1234567890', reconnectHash: null, isBot: false, joinedAt: 1 } },
-        players: { 'player-tablet-use': { uid: 'tablet-user-1234567890', playerId: 'player-tablet-use', displayName: 'Tablet', connected: false, lastSeen: 1 } },
-        coordinator: { coordinatorId: 'host-user', coordinatorEpoch: 1, leaseUntil: Date.now() + 10_000, heartbeat: Date.now() }, canonical: null, commands: {},
-      }),
-    });
-
-    const identity = await joinRoom('abc123', 'Tablet');
-
-    expect(identity.playerId).toBe('player-tablet-use');
-    expect(databaseMocks.runTransaction).not.toHaveBeenCalled();
+    expect(repositoryMocks.saveSeatProof).not.toHaveBeenCalled();
+    expect(repositoryMocks.joinRoomRecord).toHaveBeenCalledTimes(1);
   });
 });
