@@ -9,6 +9,12 @@ export const APP_VERSION = packageMetadata.version;
 
 export const RELEASE_NOTES: readonly ReleaseNotes[] = [
   {
+    version: '1.2.1',
+    changes: [
+      'Los avisos de acción de la mesa desaparecen automáticamente tras unos segundos, también mientras la partida online recibe actualizaciones en tiempo real.',
+    ],
+  },
+  {
     version: '1.2.0',
     changes: [
       'El multijugador deja Firebase y pasa a Supabase Auth anónimo, PostgreSQL y Realtime con snapshots completos y reconciliación segura.',
