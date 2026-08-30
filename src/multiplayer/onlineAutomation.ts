@@ -1,5 +1,5 @@
 import type { GameState, Room } from '../types';
-import { serverNow } from '../firebase/clock';
+import { serverNow } from '../supabase/clock';
 
 export const DISCONNECTED_TAKEOVER_MS = 12_000;
 
