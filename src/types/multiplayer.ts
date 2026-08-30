@@ -46,6 +46,8 @@ export interface CommandReceipt {
 
 export interface Room {
   readonly code: string;
+  /** Monotonic PostgreSQL version used for compare-and-swap mutations. */
+  readonly transportVersion?: number;
   readonly status: 'LOBBY' | 'PLAYING' | 'ENDED';
   readonly createdAt: number;
   readonly hostUid: string;
